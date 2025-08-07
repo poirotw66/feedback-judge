@@ -129,17 +129,34 @@ class DisabilityDataEvaluator:
     def evaluate_all_fields(self, df: pd.DataFrame) -> Dict[str, EvaluationResult]:
         """評估所有欄位的準確度"""
         results = {}
-        
+
         for field_name, (correct_col, predicted_col) in self.field_mappings.items():
             if correct_col in df.columns and predicted_col in df.columns:
+                # 檢查欄位是否有實際資料
+                correct_data = df[correct_col].dropna()
+                predicted_data = df[predicted_col].dropna()
+
+                if len(correct_data) == 0:
+                    print(f"警告: 正確答案欄位 {correct_col} 沒有資料")
+                    continue
+                if len(predicted_data) == 0:
+                    print(f"警告: 預測結果欄位 {predicted_col} 沒有資料")
+                    continue
+
                 correct_values = df[correct_col].tolist()
                 predicted_values = df[predicted_col].tolist()
-                
+
                 result = self.evaluate_field(correct_values, predicted_values, field_name)
                 results[field_name] = result
+                print(f"成功評估欄位: {field_name} ({correct_col} vs {predicted_col})")
             else:
-                print(f"警告: 找不到欄位 {correct_col} 或 {predicted_col}")
-        
+                missing_cols = []
+                if correct_col not in df.columns:
+                    missing_cols.append(correct_col)
+                if predicted_col not in df.columns:
+                    missing_cols.append(predicted_col)
+                print(f"警告: 找不到欄位 {missing_cols} for {field_name}")
+
         return results
     
     def calculate_overall_accuracy(self, results: Dict[str, EvaluationResult]) -> float:
@@ -201,33 +218,40 @@ class DisabilityDataEvaluator:
             matched_fields=matched_count
         )
     
-    def evaluate_all_records(self, df: pd.DataFrame, 
+    def evaluate_all_records(self, df: pd.DataFrame,
                            field_mappings: Dict[str, Tuple[str, str]] = None) -> List[RecordEvaluation]:
         """評估所有記錄中每個欄位的準確度"""
         if field_mappings is None:
             field_mappings = self.field_mappings
-        
+
         record_evaluations = []
-        
+
         for index, row in df.iterrows():
             # 取得編號和受編
             record_id = str(row.get('編號', index + 1))
             subject_id = str(row.get('受編', f'記錄{index + 1}'))
-            
+
             # 準備本筆記錄的欄位資料
             record_data = {}
-            
+
             for field_name, (correct_col, predicted_col) in field_mappings.items():
                 if correct_col in df.columns and predicted_col in df.columns:
                     correct_value = row.get(correct_col)
                     predicted_value = row.get(predicted_col)
-                    record_data[field_name] = (correct_value, predicted_value)
-            
+
+                    # 檢查是否有實際資料（不是NaN或空值）
+                    if pd.notna(correct_value) and pd.notna(predicted_value):
+                        record_data[field_name] = (correct_value, predicted_value)
+                    elif pd.notna(correct_value) and pd.isna(predicted_value):
+                        # 有正確答案但沒有預測結果，記錄為0分
+                        record_data[field_name] = (correct_value, "")
+                    # 如果正確答案也是空的，就跳過這個欄位
+
             if record_data:
                 # 評估本筆記錄
                 evaluation = self.evaluate_record_fields(record_data, record_id, subject_id)
                 record_evaluations.append(evaluation)
-        
+
         return record_evaluations
     
     def get_improvement_suggestion(self, field_result: RecordFieldResult) -> str:

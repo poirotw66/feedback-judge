@@ -53,33 +53,9 @@ class ExcelResultGenerator:
             # Use openpyxl engine for Chinese characters support
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 try:
-                    # 1. Individual Record Analysis Sheet (NEW - Primary detailed breakdown)
-                    logger.info("生成個別記錄分析工作表...")
-                    self._create_individual_record_analysis_sheet(writer, record_evaluations)
-
-                    # 2. Field-by-Field Summary Sheet (NEW - Field accuracy summary)
-                    logger.info("生成欄位準確度摘要工作表...")
-                    self._create_field_summary_sheet(writer, field_results, record_evaluations)
-
-                    # 3. 評估摘要頁 (Overall summary)
-                    logger.info("生成評估摘要工作表...")
-                    self._create_summary_sheet(writer, summary, field_results)
-
-                    # 4. 記錄摘要頁 (Record summary)
-                    logger.info("生成記錄摘要工作表...")
-                    self._create_record_summary_sheet(writer, record_evaluations)
-
-                    # 5. 詳細欄位比較頁 (Detailed comparison)
-                    logger.info("生成詳細欄位比較工作表...")
-                    self._create_detailed_comparison_sheet(writer, record_evaluations)
-
-                    # 6. 錯誤分析頁 (Error analysis)
-                    logger.info("生成錯誤分析工作表...")
-                    self._create_error_analysis_sheet(writer, record_evaluations)
-
-                    # 7. 原始資料頁 (Original data)
-                    logger.info("生成原始資料工作表...")
-                    self._create_original_data_sheet(writer, original_data)
+                    # Only generate the simplified individual record analysis sheet
+                    logger.info("生成簡化個別記錄分析工作表...")
+                    self._create_simplified_individual_analysis_sheet(writer, record_evaluations)
 
                 except Exception as sheet_error:
                     logger.error(f"生成工作表時發生錯誤: {sheet_error}")
@@ -103,6 +79,45 @@ class ExcelResultGenerator:
         except Exception as e:
             logger.error(f"生成Excel檔案時發生錯誤: {str(e)}")
             raise ExcelGenerationError(f"生成Excel檔案時發生錯誤: {str(e)}")
+
+    def _create_simplified_individual_analysis_sheet(self, writer: pd.ExcelWriter, record_evaluations: List[RecordEvaluation]):
+        """建立簡化的個別記錄分析頁 - 僅包含受編、欄位、準確度三欄"""
+        analysis_data = []
+
+        for evaluation in record_evaluations:
+            # 第一行：受編
+            analysis_data.append({
+                '受編': str(evaluation.subject_id) if evaluation.subject_id is not None else '',
+                '欄位': '',
+                '準確度': ''
+            })
+
+            # 各欄位的準確度
+            for field_name, field_result in evaluation.field_results.items():
+                accuracy_percentage = f"{field_result.similarity:.1%}"
+
+                analysis_data.append({
+                    '受編': '',
+                    '欄位': str(field_name),
+                    '準確度': accuracy_percentage
+                })
+
+            # 整體準確度行
+            analysis_data.append({
+                '受編': '',
+                '欄位': '整體準確度',
+                '準確度': f"{evaluation.overall_accuracy:.2%}"
+            })
+
+            # 分隔線
+            analysis_data.append({
+                '受編': '',
+                '欄位': '--- 分隔線 ---',
+                '準確度': ''
+            })
+
+        analysis_df = pd.DataFrame(analysis_data)
+        self._safe_dataframe_to_excel(analysis_df, writer, '個別記錄分析')
 
     def _create_individual_record_analysis_sheet(self, writer: pd.ExcelWriter, record_evaluations: List[RecordEvaluation]):
         """建立個別記錄分析頁 - 詳細的逐筆記錄分析"""

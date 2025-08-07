@@ -288,9 +288,13 @@ class DisabilityDataEvaluatorService:
             if correct_col and predicted_col:
                 mappings[field_name] = (correct_col, predicted_col)
                 logger.info(f"找到重複欄位映射: {field_name} -> ({correct_col}, {predicted_col})")
+            elif correct_col and not predicted_col:
+                logger.warning(f"找到正確欄位 {field_name} 但沒有找到對應的預測欄位 {field_name}.1")
+            elif not correct_col and predicted_col:
+                logger.warning(f"找到預測欄位 {field_name}.1 但沒有找到對應的正確欄位 {field_name}")
 
         # 如果找到足夠的映射，返回結果
-        if len(mappings) >= 2:
+        if len(mappings) >= 1:  # 降低要求，至少要有1個有效映射
             logger.info(f"成功偵測重複欄位映射: {mappings}")
             return mappings
 
