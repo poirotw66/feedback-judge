@@ -72,7 +72,9 @@ class DisabilityDataEvaluatorService:
                 original_data=df,
                 field_results=field_results,
                 record_evaluations=record_evaluations,
-                summary=summary
+                summary=summary,
+                original_filename=filename,
+                original_file_content=file_content
             )
             
             logger.info(f"評估完成，處理時間: {processing_time:.2f}秒")

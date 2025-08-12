@@ -27,7 +27,9 @@ class ExcelResultGenerator:
                                   original_data: pd.DataFrame,
                                   field_results: Dict[str, EvaluationResult],
                                   record_evaluations: List[RecordEvaluation],
-                                  summary: Dict) -> bytes:
+                                  summary: Dict,
+                                  original_filename: str,
+                                  original_file_content: bytes = None) -> bytes:
         """
         生成包含評估結果的Excel檔案
         
@@ -53,9 +55,10 @@ class ExcelResultGenerator:
             # Use openpyxl engine for Chinese characters support
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 try:
-                    # Only generate the simplified individual record analysis sheet
-                    logger.info("生成簡化個別記錄分析工作表...")
-                    self._create_simplified_individual_analysis_sheet(writer, record_evaluations)
+                    # Only generate the simplified individual record分析工作表（含模型名稱）
+                    logger.info("生成簡化個別記錄分析工作表（含模型名稱）...")
+                    model_name = self._extract_model_name_from_data(original_data, original_file_content)
+                    self._create_simplified_individual_analysis_sheet(writer, record_evaluations, model_name=model_name)
 
                 except Exception as sheet_error:
                     logger.error(f"生成工作表時發生錯誤: {sheet_error}")
@@ -80,44 +83,205 @@ class ExcelResultGenerator:
             logger.error(f"生成Excel檔案時發生錯誤: {str(e)}")
             raise ExcelGenerationError(f"生成Excel檔案時發生錯誤: {str(e)}")
 
-    def _create_simplified_individual_analysis_sheet(self, writer: pd.ExcelWriter, record_evaluations: List[RecordEvaluation]):
-        """建立簡化的個別記錄分析頁 - 僅包含受編、欄位、準確度三欄"""
-        analysis_data = []
+    def _create_simplified_individual_analysis_sheet(self, writer: pd.ExcelWriter, record_evaluations: List[RecordEvaluation], model_name: str = None):
+        """建立簡化的個別記錄分析頁 - 僅包含受編、欄位、準確度三欄，並在頂部加入模型名稱列"""
+        analysis_rows = []
 
+        # 第一行：模型名稱（A1="模型", B1=模型名稱, C1 空白）
+        analysis_rows.append(['模型', model_name if model_name else '', ''])
+
+        # 第二行：欄位標題
+        analysis_rows.append(['受編', '欄位', '準確度'])
+
+        # 後續資料行
         for evaluation in record_evaluations:
-            # 第一行：受編
-            analysis_data.append({
-                '受編': str(evaluation.subject_id) if evaluation.subject_id is not None else '',
-                '欄位': '',
-                '準確度': ''
-            })
+            # 受編行
+            analysis_rows.append([str(evaluation.subject_id) if evaluation.subject_id is not None else '', '', ''])
 
             # 各欄位的準確度
             for field_name, field_result in evaluation.field_results.items():
                 accuracy_percentage = f"{field_result.similarity:.1%}"
-
-                analysis_data.append({
-                    '受編': '',
-                    '欄位': str(field_name),
-                    '準確度': accuracy_percentage
-                })
+                analysis_rows.append(['', str(field_name), accuracy_percentage])
 
             # 整體準確度行
-            analysis_data.append({
-                '受編': '',
-                '欄位': '整體準確度',
-                '準確度': f"{evaluation.overall_accuracy:.2%}"
-            })
+            analysis_rows.append(['', '整體準確度', f"{evaluation.overall_accuracy:.2%}"])
 
             # 分隔線
-            analysis_data.append({
-                '受編': '',
-                '欄位': '--- 分隔線 ---',
-                '準確度': ''
-            })
+            analysis_rows.append(['', '--- 分隔線 ---', ''])
 
-        analysis_df = pd.DataFrame(analysis_data)
-        self._safe_dataframe_to_excel(analysis_df, writer, '個別記錄分析')
+        # 轉為DataFrame並輸出（不使用header，因為我們已經手動加入了標題行）
+        analysis_df = pd.DataFrame(analysis_rows, columns=['受編', '欄位', '準確度'])
+        self._safe_dataframe_to_excel(analysis_df, writer, '個別記錄分析', header=False)
+
+    def _extract_model_name_from_filename(self, filename: str) -> str:
+        """從檔名中抽取模型名稱，依據指定規則"""
+        if not filename:
+            return ''
+
+        # 取得檔案名稱（去除路徑）
+        base_name = filename.rsplit('/', 1)[-1]
+        name_lower = base_name.lower()
+
+        # 規則對照表 (lower-case 搜尋字串 -> 輸出模型名)
+        rules = [
+            ('gemini2.5proexp0325', 'gemini-2.5-pro-exp-03-25'),
+            ('gemini2.5pro', 'gemini-2.5-pro-exp-03-25'),  # 匹配 [gemini2.5pro] 格式
+            ('gemma327b', 'gemma3:27b'),
+            ('gemma327bqat', 'gemma 3 27b qat'),
+            ('gemma3', 'gemma3'),  # 基本 gemma3 匹配
+            ('chatgpt4.1', 'Chatgpt 4.1'),
+            ('chatgpt', 'ChatGPT'),  # 基本 ChatGPT 匹配
+        ]
+
+        for key, value in rules:
+            if key in name_lower:
+                return value
+
+        # 若未匹配到，嘗試從方括號中提取模型名稱
+        if '[' in base_name and ']' in base_name:
+            start = base_name.find('[')
+            end = base_name.find(']')
+            if start != -1 and end != -1 and end > start:
+                bracket_content = base_name[start + 1:end]
+                if bracket_content.strip():
+                    return bracket_content.strip()
+
+        # 最後的備用方案：移除副檔名與括號前綴
+        base = base_name.rsplit('.', 1)[0]
+        if base.startswith('['):
+            pos = base.find(']')
+            if pos != -1:
+                base = base[pos + 1:]
+        return base.strip() or '未知模型'
+
+    def _extract_model_name_from_data(self, df: pd.DataFrame, original_file_content: bytes = None) -> str:
+        """從Excel檔案內容中提取模型名稱"""
+        try:
+            # 首先嘗試從原始Excel檔案的前幾行讀取模型名稱
+            if original_file_content:
+                model_name = self._extract_from_raw_excel_headers(original_file_content)
+                if model_name and model_name != '未知模型':
+                    return model_name
+
+            # 如果從標題行找不到，檢查所有欄位中是否包含模型名稱相關資訊
+            model_indicators = []
+
+            # 搜尋所有欄位名稱和內容
+            for col in df.columns:
+                col_str = str(col).lower()
+
+                # 檢查欄位名稱是否包含模型相關關鍵字
+                if any(keyword in col_str for keyword in ['模型', 'model', 'ai', '預測', 'prediction', 'gemini', 'gemma', 'chatgpt', 'claude']):
+                    # 如果欄位名稱包含模型相關字詞，檢查該欄位的內容
+                    non_empty_values = df[col].dropna().astype(str)
+                    for value in non_empty_values:
+                        model_name = self._parse_model_name_from_text(value)
+                        if model_name:
+                            model_indicators.append(model_name)
+
+            # 如果沒有在欄位名稱中找到，搜尋所有文字內容
+            if not model_indicators:
+                for col in df.columns:
+                    if df[col].dtype == 'object':  # 只檢查文字欄位
+                        non_empty_values = df[col].dropna().astype(str)
+                        for value in non_empty_values:
+                            model_name = self._parse_model_name_from_text(value)
+                            if model_name:
+                                model_indicators.append(model_name)
+
+            # 返回最常見的模型名稱，或第一個找到的
+            if model_indicators:
+                # 統計出現次數，返回最常見的
+                from collections import Counter
+                most_common = Counter(model_indicators).most_common(1)
+                return most_common[0][0] if most_common else model_indicators[0]
+
+            return '未知模型'
+
+        except Exception as e:
+            logger.warning(f"從檔案內容提取模型名稱時發生錯誤: {e}")
+            return '未知模型'
+
+    def _extract_from_raw_excel_headers(self, file_content: bytes) -> str:
+        """從原始Excel檔案的標題行提取模型名稱"""
+        try:
+            import io
+            import openpyxl
+
+            # 從bytes內容讀取Excel檔案
+            file_stream = io.BytesIO(file_content)
+            workbook = openpyxl.load_workbook(file_stream)
+
+            # 檢查第一個工作表的前幾行
+            worksheet = workbook.active
+
+            # 檢查前5行的所有儲存格，尋找模型名稱
+            for row in range(1, 6):  # 檢查前5行
+                for col in range(1, worksheet.max_column + 1):
+                    cell = worksheet.cell(row=row, column=col)
+                    if cell.value:
+                        cell_text = str(cell.value)
+                        model_name = self._parse_model_name_from_text(cell_text)
+                        if model_name:
+                            logger.info(f"在第{row}行第{col}列找到模型名稱: {model_name}")
+                            return model_name
+
+            return '未知模型'
+        except Exception as e:
+            logger.warning(f"從原始Excel標題行提取模型名稱時發生錯誤: {e}")
+            return '未知模型'
+
+    def _parse_model_name_from_text(self, text: str) -> str:
+        """從文字中解析模型名稱"""
+        if not text or pd.isna(text):
+            return ''
+
+        text_lower = str(text).lower()
+
+        # 模型名稱識別規則
+        model_patterns = [
+            # Gemini 系列
+            ('gemini-2.5-pro-exp-03-25', 'gemini-2.5-pro-exp-03-25'),
+            ('gemini 2.5 pro exp 03 25', 'gemini-2.5-pro-exp-03-25'),
+            ('gemini2.5proexp0325', 'gemini-2.5-pro-exp-03-25'),
+            ('gemini2.5pro', 'gemini-2.5-pro'),
+            ('gemini 2.5 pro', 'gemini-2.5-pro'),
+            ('gemini', 'Gemini'),
+
+            # Gemma 系列
+            ('gemma 3 27b qat', 'gemma 3 27b qat'),
+            ('gemma3:27b', 'gemma3:27b'),
+            ('gemma327bqat', 'gemma 3 27b qat'),
+            ('gemma327b', 'gemma3:27b'),
+            ('gemma3', 'gemma3'),
+            ('gemma', 'Gemma'),
+
+            # ChatGPT 系列
+            ('chatgpt 4.1', 'ChatGPT 4.1'),
+            ('chatgpt4.1', 'ChatGPT 4.1'),
+            ('chatgpt-4', 'ChatGPT-4'),
+            ('chatgpt4', 'ChatGPT-4'),
+            ('chatgpt', 'ChatGPT'),
+            ('gpt-4', 'GPT-4'),
+            ('gpt4', 'GPT-4'),
+
+            # Claude 系列
+            ('claude-3', 'Claude-3'),
+            ('claude3', 'Claude-3'),
+            ('claude', 'Claude'),
+
+            # 其他常見模型
+            ('llama', 'LLaMA'),
+            ('palm', 'PaLM'),
+            ('bard', 'Bard'),
+        ]
+
+        # 按照優先級匹配（更具體的模式優先）
+        for pattern, model_name in model_patterns:
+            if pattern in text_lower:
+                return model_name
+
+        return ''
 
     def _create_individual_record_analysis_sheet(self, writer: pd.ExcelWriter, record_evaluations: List[RecordEvaluation]):
         """建立個別記錄分析頁 - 詳細的逐筆記錄分析"""
