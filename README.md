@@ -1,165 +1,228 @@
-# 身心障礙手冊AI測試結果準確度評分系統
+# Disability Certificate AI Accuracy Evaluator API
 
-## 專案概述
+身心障礙手冊AI測試結果準確度評分系統 - FastAPI版本
 
-這是一個專門用於評估AI模型在身心障礙手冊資料處理準確度的Python程式系統。系統能夠自動讀取Excel檔案，比較人工標註（正面）與AI預測（反面）的結果，並生成詳細的準確度報告。
+## 概述
 
-## 主要功能
+這是一個基於FastAPI的Web API，用於評估身心障礙手冊AI測試結果的準確度。系統接受Excel檔案上傳，分析AI預測結果與正確答案的相似度，並生成詳細的評估報告。
 
-✅ **智能Excel解析**: 自動偵測複雜的Excel檔案結構和標題行位置  
-✅ **多欄位評估**: 支援障礙等級、障礙類別、ICD診斷等多個欄位的準確度評估  
-✅ **相似度分析**: 不僅計算完全匹配，還提供字串相似度分析  
-✅ **詳細報告**: 生成包含錯誤分析的詳細Excel報告  
-✅ **權重配置**: 可自訂各欄位的評估權重  
+## 功能特色
 
-## 系統架構
+- **檔案上傳**: 支援.xlsx和.xls格式的Excel檔案
+- **準確度評估**: 計算各欄位和整體的準確度分數
+- **詳細分析**: 提供逐筆記錄的欄位比較
+- **錯誤分析**: 識別和分類不同類型的錯誤
+- **Excel輸出**: 生成包含評估結果的Excel報告
+- **RESTful API**: 標準的HTTP API介面
 
-```
-feedback-judge/
-├── accuracy_evaluator.py    # 核心評估引擎
-├── smart_processor.py      # 智能Excel處理器（推薦使用）
-├── excel_processor.py      # 通用Excel處理器
-├── main.py                # 基本範例程式
-├── usage_guide.py         # 使用說明程式
-└── README.md              # 本檔案
-```
+## 安裝與設定
 
-## 快速開始
-
-### 1. 環境設定
+### 1. 安裝依賴套件
 
 ```bash
-# 使用conda環境（如您指定的crawl4ai）
-conda activate crawl4ai
-
-# 或使用虛擬環境
-python -m venv .venv
-source .venv/bin/activate  # macOS/Linux
-# 或 .venv\Scripts\activate  # Windows
-
-# 安裝必要套件
-pip install pandas numpy openpyxl
+pip install -r requirements.txt
 ```
 
-### 2. 準備資料
-
-確保您的Excel檔案包含以下格式的資料：
-
-| 編號 | 受編 | 障礙等級 | 障礙類別 | ICD診斷 | ... | 障礙等級(AI) | 障礙類別(AI) | ICD診斷(AI) |
-|------|------|----------|----------|---------|-----|--------------|--------------|-------------|
-| 1    | ZA... | 輕度     | 其他類   | 【換16.1】| ... | 輕度         | 其他類       | 【換16.1】  |
-
-### 3. 執行評估
+### 2. 啟動API服務
 
 ```bash
-# 使用智能處理器（推薦）
-python smart_processor.py
+# 開發模式
+uvicorn app:app --reload --host 0.0.0.0 --port 8000
 
-# 或使用基本處理器
-python main.py
+# 生產模式
+uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
-## 評估結果
+### 3. 訪問API文檔
 
-### 實際測試結果（基於您的資料）
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
 
-**整體準確度: 85.30%**
+## API端點
 
-| 欄位 | 準確度 | 完全匹配率 | 說明 |
-|------|--------|------------|------|
-| 障礙類別 | 99.58% | 86.7% | 表現優秀，大部分都能正確識別 |
-| ICD診斷 | 68.17% | 42.9% | 需要改進，部分項目識別困難 |
+### 1. 根端點
+- **URL**: `GET /`
+- **描述**: 取得API基本資訊
+- **回應**: API歡迎訊息和端點列表
 
-### 主要問題分析
+### 2. 健康檢查
+- **URL**: `GET /health`
+- **描述**: 檢查API服務狀態
+- **回應**: 服務健康狀態
 
-1. **ICD診斷欄位**: 
-   - 某些複雜格式無法正確識別
-   - 建議加強訓練資料中的醫學診斷代碼樣本
+### 3. 準確度評估
+- **URL**: `POST /evaluate`
+- **描述**: 上傳Excel檔案進行準確度評估
+- **請求**: 
+  - Content-Type: `multipart/form-data`
+  - 參數: `file` (Excel檔案)
+- **回應**: Excel檔案 (包含評估結果)
 
-2. **影像品質影響**:
-   - 浮水印和雜訊會影響識別準確度
-   - 建議預處理改善影像品質
+## 使用方式
 
-## 系統特色
+### 1. 使用curl
 
-### 1. 智能欄位識別
-- 自動偵測Excel檔案的標題行位置
-- 智能映射正面（標準答案）和反面（AI預測）欄位
-- 支援複雜的多級標題結構
+```bash
+curl -X POST "http://localhost:8000/evaluate" \
+     -H "accept: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" \
+     -H "Content-Type: multipart/form-data" \
+     -F "file=@your_data.xlsx" \
+     --output result.xlsx
+```
 
-### 2. 多層次評估
-- **完全匹配**: 計算完全相同的項目
-- **相似度評估**: 使用序列匹配算法
-- **加權評估**: 根據欄位重要性調整權重
-
-### 3. 詳細錯誤分析
-- 列出所有不匹配的項目
-- 提供相似度分數
-- 識別常見錯誤模式
-
-## 配置選項
-
-在 `accuracy_evaluator.py` 中可調整：
+### 2. 使用Python requests
 
 ```python
-# 相似度閾值
-similarity_threshold = 0.8
+import requests
 
-# 欄位權重設定
-weight_config = {
-    FieldType.DISABILITY_LEVEL: 0.3,    # 障礙等級
-    FieldType.DISABILITY_CATEGORY: 0.3,  # 障礙類別  
-    FieldType.ICD_DIAGNOSIS: 0.25,      # ICD診斷
-    FieldType.CERTIFICATE_TYPE: 0.15    # 證明/手冊類型
+url = "http://localhost:8000/evaluate"
+files = {"file": open("your_data.xlsx", "rb")}
+
+response = requests.post(url, files=files)
+
+if response.status_code == 200:
+    with open("result.xlsx", "wb") as f:
+        f.write(response.content)
+    print("評估完成，結果已儲存至 result.xlsx")
+else:
+    print(f"錯誤: {response.status_code} - {response.text}")
+```
+
+### 3. 使用JavaScript (前端)
+
+```javascript
+const formData = new FormData();
+formData.append('file', fileInput.files[0]);
+
+fetch('http://localhost:8000/evaluate', {
+    method: 'POST',
+    body: formData
+})
+.then(response => {
+    if (response.ok) {
+        return response.blob();
+    }
+    throw new Error('評估失敗');
+})
+.then(blob => {
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'evaluation_result.xlsx';
+    a.click();
+});
+```
+
+## 輸入檔案格式
+
+Excel檔案應包含以下欄位：
+
+### 必要欄位
+- `編號`: 記錄編號
+- `受編`: 受測者編號
+- `正面_障礙等級`: 正確的障礙等級
+- `正面_障礙類別`: 正確的障礙類別
+- `正面_ICD診斷`: 正確的ICD診斷
+- `反面_障礙等級`: AI預測的障礙等級
+- `反面_障礙類別`: AI預測的障礙類別
+- `反面_ICD診斷`: AI預測的ICD診斷
+
+### 範例資料格式
+
+| 編號 | 受編 | 正面_障礙等級 | 正面_障礙類別 | 正面_ICD診斷 | 反面_障礙等級 | 反面_障礙類別 | 反面_ICD診斷 |
+|------|------|---------------|---------------|---------------|---------------|---------------|---------------|
+| 1 | ZA24761194 | 輕度 | 其他類 | 【換16.1】 | 輕度 | 障礙類別：其他類 | 【換16.1】 |
+| 2 | MT00953431 | 中度 | 第1類【12.2】 | 【換12.2】 | 中度 | 第1類【12.2】 | 【第12.2】 |
+
+## 輸出檔案內容
+
+生成的Excel檔案包含以下工作表：
+
+1. **評估摘要**: 整體統計和各欄位準確度
+2. **記錄摘要**: 每筆記錄的準確度摘要
+3. **詳細欄位比較**: 逐欄位的詳細比較結果
+4. **欄位統計**: 各欄位的統計分析
+5. **錯誤分析**: 錯誤類型分析和改進建議
+6. **原始資料**: 上傳的原始資料
+7. **準確度分佈**: 準確度等級分佈統計
+
+## 錯誤處理
+
+API提供詳細的錯誤訊息：
+
+### 檔案驗證錯誤 (400)
+- 檔案格式不支援
+- 檔案為空
+- 檔案過大 (>10MB)
+
+### 資料驗證錯誤 (422)
+- 缺少必要欄位
+- 資料格式錯誤
+
+### 處理錯誤 (500)
+- 檔案讀取失敗
+- 評估處理錯誤
+- Excel生成錯誤
+
+### 錯誤回應格式
+
+```json
+{
+    "error": true,
+    "message": "錯誤描述",
+    "status_code": 400,
+    "timestamp": "2024-01-01T12:00:00",
+    "details": {
+        "error_type": "file_validation_error",
+        "filename": "example.xlsx"
+    }
 }
 ```
 
-## 輸出檔案
+## 效能考量
 
-系統會生成以下檔案：
+- 檔案大小限制: 10MB
+- 建議記錄數: <10,000筆
+- 處理時間: 通常在30秒內完成
 
-1. **智能評估結果_[檔案名].xlsx**: 包含詳細分析的Excel報告
-   - 摘要頁：各欄位準確度統計
-   - 錯誤詳情頁：不匹配項目的詳細列表
+## 安全性
 
-2. **終端報告**: 即時顯示的評估摘要
+- 檔案類型驗證
+- 檔案大小限制
+- 輸入資料驗證
+- 錯誤訊息不洩露敏感資訊
 
-## 使用建議
+## 開發與部署
 
-### 資料準備
-- 確保Excel檔案格式一致
-- 清理不必要的空白和特殊字符
-- 標準化診斷代碼格式
+### 開發環境
+```bash
+# 安裝開發依賴
+pip install -r requirements.txt
 
-### 參數調整
-- 根據實際需求調整相似度閾值
-- 針對特定應用場景調整欄位權重
-- 定期更新文字標準化規則
+# 啟動開發服務器
+uvicorn app:app --reload
+```
 
-### 結果驗證
-- 結合人工檢查驗證自動評估結果
-- 定期分析錯誤模式並改進
-- 建立評估基準線進行比較
+### 生產部署
+```bash
+# 使用Gunicorn
+pip install gunicorn
+gunicorn app:app -w 4 -k uvicorn.workers.UvicornWorker
 
-## 技術支援
+# 使用Docker
+docker build -t accuracy-evaluator .
+docker run -p 8000:8000 accuracy-evaluator
+```
 
-如遇到問題，請檢查：
+## 技術架構
 
-1. **檔案格式**: 確保Excel檔案可正常開啟
-2. **Python環境**: 確認已安裝必要套件
-3. **資料品質**: 檢查是否有缺失或格式錯誤的資料
+- **框架**: FastAPI
+- **資料處理**: Pandas, NumPy
+- **Excel處理**: openpyxl, xlrd
+- **API文檔**: Swagger UI, ReDoc
+- **錯誤處理**: 自定義例外類別
+- **日誌**: Python logging
 
-## 版本資訊
+## 支援與維護
 
-- **當前版本**: 1.0.0
-- **Python版本**: 3.8+
-- **主要依賴**: pandas, numpy, openpyxl
-- **測試環境**: macOS, Python 3.12
-
-## 授權
-
-本專案基於MIT授權協議開源。
-
----
-
-*最後更新: 2025年8月6日*
+如有問題或建議，請聯繫開發團隊或提交Issue。
