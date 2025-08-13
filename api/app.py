@@ -5,7 +5,7 @@ FastAPI Application for Disability Certificate AI Test Results Accuracy Evaluati
 身心障礙手冊AI測試結果準確度評分系統 - FastAPI版本
 """
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Response, Request
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Response, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
@@ -76,13 +76,15 @@ async def health_check():
 
 @app.post("/evaluate")
 async def evaluate_accuracy(
-    file: UploadFile = File(..., description="Excel file (.xlsx or .xls) containing AI test results")
+    file: UploadFile = File(..., description="Excel file (.xlsx or .xls) containing AI test results"),
+    valueSetId: str = Form(None, description="Value Set ID for the evaluation")
 ):
     """
     Evaluate accuracy of AI test results from uploaded Excel file
 
     Args:
         file: Excel file containing the AI test results data
+        valueSetId: Optional Value Set ID for the evaluation
 
     Returns:
         Excel file with accuracy evaluation results
@@ -107,11 +109,11 @@ async def evaluate_accuracy(
                 file.filename
             )
 
-        logger.info(f"Processing file: {file.filename}, size: {len(file_content)} bytes")
+        logger.info(f"Processing file: {file.filename}, size: {len(file_content)} bytes, valueSetId: {valueSetId}")
 
         # Process the file and get results
         result_file_content, output_filename = await evaluator_service.process_excel_file(
-            file_content, file.filename
+            file_content, file.filename, valueSetId
         )
 
         logger.info(f"Successfully processed file: {file.filename}")

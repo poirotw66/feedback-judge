@@ -219,14 +219,15 @@ class DisabilityDataEvaluatorService:
         logger.info(f"橫向模型分割完成，總共找到 {len(model_blocks)} 個模型: {list(model_blocks.keys())}")
         return model_blocks
 
-    async def process_excel_file(self, file_content: bytes, filename: str) -> Tuple[bytes, str]:
+    async def process_excel_file(self, file_content: bytes, filename: str, value_set_id: str = None) -> Tuple[bytes, str]:
         """
         處理上傳的Excel檔案並返回評估結果
-        
+
         Args:
             file_content: Excel檔案內容
             filename: 原始檔案名稱
-            
+            value_set_id: 可選的Value Set ID
+
         Returns:
             Tuple[bytes, str]: (結果Excel檔案內容, 輸出檔案名稱)
         """
@@ -268,12 +269,12 @@ class DisabilityDataEvaluatorService:
                 print(f"DEBUG: 偵測到 {len(model_blocks)} 個模型: {list(model_blocks.keys())}")
                 print(f"DEBUG: 使用多模型處理邏輯")
                 # 多模型處理
-                return await self._process_multiple_models(model_blocks, file_content, filename, start_time)
+                return await self._process_multiple_models(model_blocks, file_content, filename, start_time, value_set_id)
             else:
                 logger.info("單一模型處理模式")
                 print("DEBUG: 單一模型處理模式")
                 # 單一模型處理（原有邏輯）
-                return await self._process_single_model(df, file_content, filename, start_time)
+                return await self._process_single_model(df, file_content, filename, start_time, value_set_id)
             
         except (FileProcessingError, DataValidationError, EvaluationError, ExcelGenerationError):
             raise
@@ -281,8 +282,8 @@ class DisabilityDataEvaluatorService:
             logger.error(f"處理Excel檔案時發生錯誤: {str(e)}")
             raise EvaluationError(f"處理Excel檔案時發生未預期的錯誤: {str(e)}")
     
-    async def _process_multiple_models(self, model_blocks: Dict[str, pd.DataFrame], 
-                                     file_content: bytes, filename: str, start_time: float) -> Tuple[bytes, str]:
+    async def _process_multiple_models(self, model_blocks: Dict[str, pd.DataFrame],
+                                     file_content: bytes, filename: str, start_time: float, value_set_id: str = None) -> Tuple[bytes, str]:
         """處理多個模型的資料"""
         all_model_results = {}
         
@@ -339,14 +340,15 @@ class DisabilityDataEvaluatorService:
             model_results=all_model_results,
             processing_time=processing_time,
             original_filename=filename,
-            original_file_content=file_content
+            original_file_content=file_content,
+            value_set_id=value_set_id
         )
         
         logger.info(f"多模型評估完成，處理時間: {processing_time:.2f}秒")
         return result_content, output_filename
     
-    async def _process_single_model(self, df: pd.DataFrame, file_content: bytes, 
-                                   filename: str, start_time: float) -> Tuple[bytes, str]:
+    async def _process_single_model(self, df: pd.DataFrame, file_content: bytes,
+                                   filename: str, start_time: float, value_set_id: str = None) -> Tuple[bytes, str]:
         """處理單一模型的資料（原有邏輯）"""
         # 驗證必要欄位
         self._validate_required_columns(df)
@@ -371,7 +373,8 @@ class DisabilityDataEvaluatorService:
             record_evaluations=record_evaluations,
             summary=summary,
             original_filename=filename,
-            original_file_content=file_content
+            original_file_content=file_content,
+            value_set_id=value_set_id
         )
         
         logger.info(f"評估完成，處理時間: {processing_time:.2f}秒")

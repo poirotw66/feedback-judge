@@ -27,16 +27,18 @@ class ExcelResultGenerator:
                                        model_results: Dict[str, Dict],
                                        processing_time: float,
                                        original_filename: str,
-                                       original_file_content: bytes = None) -> bytes:
+                                       original_file_content: bytes = None,
+                                       value_set_id: str = None) -> bytes:
         """
         生成包含多個模型評估結果的Excel檔案，每個模型一個sheet
-        
+
         Args:
             model_results: {模型名稱: {data, field_results, record_evaluations, overall_accuracy}}
             processing_time: 處理時間
             original_filename: 原始檔案名稱
             original_file_content: 原始檔案內容
-            
+            value_set_id: 可選的Value Set ID
+
         Returns:
             bytes: Excel檔案內容
         """
@@ -54,10 +56,11 @@ class ExcelResultGenerator:
                         
                         # 為每個模型生成簡化的個別記錄分析工作表
                         self._create_simplified_individual_analysis_sheet(
-                            writer, 
-                            results['record_evaluations'], 
+                            writer,
+                            results['record_evaluations'],
                             model_name=model_name,
-                            sheet_name=safe_sheet_name
+                            sheet_name=safe_sheet_name,
+                            value_set_id=value_set_id
                         )
                         
                     except Exception as sheet_error:
@@ -89,16 +92,18 @@ class ExcelResultGenerator:
                                   record_evaluations: List[RecordEvaluation],
                                   summary: Dict,
                                   original_filename: str,
-                                  original_file_content: bytes = None) -> bytes:
+                                  original_file_content: bytes = None,
+                                  value_set_id: str = None) -> bytes:
         """
         生成包含評估結果的Excel檔案
-        
+
         Args:
             original_data: 原始資料
             field_results: 欄位評估結果
             record_evaluations: 記錄評估結果
             summary: 評估摘要
-            
+            value_set_id: 可選的Value Set ID
+
         Returns:
             bytes: Excel檔案內容
         """
@@ -118,7 +123,7 @@ class ExcelResultGenerator:
                     # Only generate the simplified individual record分析工作表（含模型名稱）
                     logger.info("生成簡化個別記錄分析工作表（含模型名稱）...")
                     model_name = self._extract_model_name_from_data(original_data, original_file_content)
-                    self._create_simplified_individual_analysis_sheet(writer, record_evaluations, model_name=model_name)
+                    self._create_simplified_individual_analysis_sheet(writer, record_evaluations, model_name=model_name, value_set_id=value_set_id)
 
                 except Exception as sheet_error:
                     logger.error(f"生成工作表時發生錯誤: {sheet_error}")
@@ -143,13 +148,13 @@ class ExcelResultGenerator:
             logger.error(f"生成Excel檔案時發生錯誤: {str(e)}")
             raise ExcelGenerationError(f"生成Excel檔案時發生錯誤: {str(e)}")
 
-    def _create_simplified_individual_analysis_sheet(self, writer: pd.ExcelWriter, record_evaluations: List[RecordEvaluation], 
-                                                    model_name: str = None, sheet_name: str = '個別記錄分析'):
+    def _create_simplified_individual_analysis_sheet(self, writer: pd.ExcelWriter, record_evaluations: List[RecordEvaluation],
+                                                    model_name: str = None, sheet_name: str = '個別記錄分析', value_set_id: str = None):
         """建立簡化的個別記錄分析頁 - 包含OCR評估指標：準確度、CER、WER"""
         analysis_rows = []
 
-        # 第一行：模型名稱（A1="模型", B1=模型名稱, C1 空白）
-        analysis_rows.append(['模型', model_name if model_name else '', '', '', ''])
+        # 第一行：模型名稱（A1="模型", B1=模型名稱, C1="valueSetId", D1=valueSetId值）
+        analysis_rows.append(['模型', model_name if model_name else '', 'valueSetId', value_set_id if value_set_id else '', ''])
 
         # 第二行：欄位標題
         analysis_rows.append(['受編', '欄位', '準確度', 'CER', 'WER'])
