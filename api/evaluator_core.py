@@ -74,11 +74,21 @@ class DisabilityDataEvaluator:
         """標準化文字處理（OCR專用，保留原始字元）"""
         if pd.isna(text) or text is None:
             return ""
-        
+
         text = str(text).strip()
         # 移除多餘的空格，但保留原始字元用於精確OCR評估
         text = re.sub(r'\s+', '', text)
         # 不進行括號轉換，保持原始字元以進行精確的OCR評估
+        return text
+
+    def normalize_text_for_wer(self, text: str) -> str:
+        """標準化文字，用於WER計算（保留空格用於單詞分割）"""
+        if pd.isna(text) or text is None:
+            return ""
+
+        text = str(text).strip()
+        # 標準化空格，但保留用於單詞分割
+        text = re.sub(r'\s+', ' ', text)
         return text
     
     def calculate_cer(self, reference: str, hypothesis: str) -> float:
@@ -89,79 +99,139 @@ class DisabilityDataEvaluator:
         """
         ref_norm = self.normalize_text(reference)
         hyp_norm = self.normalize_text(hypothesis)
-        
+
         if not ref_norm and not hyp_norm:
             return 0.0
         if not ref_norm:
             return 1.0 if hyp_norm else 0.0
         if not hyp_norm:
             return 1.0
-        
-        # 使用編輯距離計算字元級錯誤
-        edits = difflib.SequenceMatcher(None, ref_norm, hyp_norm).get_opcodes()
-        
-        substitutions = 0
-        deletions = 0
-        insertions = 0
-        
-        for op, i1, i2, j1, j2 in edits:
-            if op == 'replace':
-                substitutions += max(i2 - i1, j2 - j1)
-            elif op == 'delete':
-                deletions += i2 - i1
-            elif op == 'insert':
-                insertions += j2 - j1
-        
-        total_errors = substitutions + deletions + insertions
-        return total_errors / len(ref_norm) if len(ref_norm) > 0 else 0.0
+
+        # 使用標準的編輯距離算法計算CER
+        return self._calculate_edit_distance_rate(ref_norm, hyp_norm)
     
     def calculate_wer(self, reference: str, hypothesis: str) -> float:
         """
         計算單詞錯誤率 (Word Error Rate, WER)
         WER = (S + D + I) / N
         其中 S=替換, D=刪除, I=插入, N=參考文字單詞數
-        
+
         對於中文，將每個字符視為一個"單詞"
+        對於英文，按空格分割單詞
         """
-        ref_norm = self.normalize_text(reference)
-        hyp_norm = self.normalize_text(hypothesis)
-        
+        # 使用保留空格的標準化方法
+        ref_norm = self.normalize_text_for_wer(reference)
+        hyp_norm = self.normalize_text_for_wer(hypothesis)
+
         if not ref_norm and not hyp_norm:
             return 0.0
         if not ref_norm:
             return 1.0 if hyp_norm else 0.0
         if not hyp_norm:
             return 1.0
-        
-        # 對於中文文字，將每個字符視為一個單詞
-        ref_words = list(ref_norm)
-        hyp_words = list(hyp_norm)
-        
-        # 使用編輯距離計算單詞級錯誤
-        edits = difflib.SequenceMatcher(None, ref_words, hyp_words).get_opcodes()
-        
-        substitutions = 0
-        deletions = 0
-        insertions = 0
-        
-        for op, i1, i2, j1, j2 in edits:
-            if op == 'replace':
-                substitutions += max(i2 - i1, j2 - j1)
-            elif op == 'delete':
-                deletions += i2 - i1
-            elif op == 'insert':
-                insertions += j2 - j1
-        
-        total_errors = substitutions + deletions + insertions
-        return total_errors / len(ref_words) if len(ref_words) > 0 else 0.0
-    
+
+        # 智能分詞：如果包含空格則按空格分割，否則按字符分割
+        if ' ' in ref_norm or ' ' in hyp_norm:
+            # 英文模式：按空格分割單詞
+            ref_words = ref_norm.split()
+            hyp_words = hyp_norm.split()
+        else:
+            # 中文模式：每個字符視為一個單詞
+            ref_words = list(ref_norm)
+            hyp_words = list(hyp_norm)
+
+        # 使用標準的編輯距離算法計算WER
+        return self._calculate_edit_distance_rate(ref_words, hyp_words)
+
+    def _calculate_edit_distance_rate(self, reference, hypothesis) -> float:
+        """
+        使用動態規劃計算標準編輯距離錯誤率
+
+        Args:
+            reference: 參考序列（字符串或列表）
+            hypothesis: 假設序列（字符串或列表）
+
+        Returns:
+            float: 錯誤率 (0.0 到 1.0+)
+        """
+        if not reference and not hypothesis:
+            return 0.0
+        if not reference:
+            return 1.0
+        if not hypothesis:
+            return 1.0
+
+        # 轉換為列表以統一處理
+        if isinstance(reference, str):
+            ref_seq = list(reference)
+        else:
+            ref_seq = reference
+
+        if isinstance(hypothesis, str):
+            hyp_seq = list(hypothesis)
+        else:
+            hyp_seq = hypothesis
+
+        # 動態規劃計算編輯距離
+        m, n = len(ref_seq), len(hyp_seq)
+
+        # 創建DP表
+        dp = [[0] * (n + 1) for _ in range(m + 1)]
+
+        # 初始化邊界條件
+        for i in range(m + 1):
+            dp[i][0] = i  # 刪除操作
+        for j in range(n + 1):
+            dp[0][j] = j  # 插入操作
+
+        # 填充DP表
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                if ref_seq[i-1] == hyp_seq[j-1]:
+                    # 字符相同，不需要操作
+                    dp[i][j] = dp[i-1][j-1]
+                else:
+                    # 字符不同，選擇最小代價操作
+                    dp[i][j] = 1 + min(
+                        dp[i-1][j],    # 刪除
+                        dp[i][j-1],    # 插入
+                        dp[i-1][j-1]   # 替換
+                    )
+
+        # 計算錯誤率
+        edit_distance = dp[m][n]
+
+        # 使用較長序列作為分母，避免錯誤率超過100%
+        max_length = max(len(ref_seq), len(hyp_seq))
+        if max_length == 0:
+            return 0.0
+
+        error_rate = edit_distance / max_length
+        # 確保錯誤率不超過1.0 (100%)
+        return min(error_rate, 1.0)
+
+    def calculate_cer_accuracy(self, reference: str, hypothesis: str) -> float:
+        """
+        計算基於CER的準確率
+        準確率 = 1 - CER
+        """
+        cer = self.calculate_cer(reference, hypothesis)
+        return max(0.0, 1.0 - cer)
+
+    def calculate_wer_accuracy(self, reference: str, hypothesis: str) -> float:
+        """
+        計算基於WER的準確率
+        準確率 = 1 - WER
+        """
+        wer = self.calculate_wer(reference, hypothesis)
+        return max(0.0, 1.0 - wer)
+
     def calculate_similarity(self, text1: str, text2: str) -> float:
         """
         計算兩個文字的相似度（基於CER的準確度）
         準確度 = 1 - CER
         """
-        cer = self.calculate_cer(text1, text2)
-        return max(0.0, 1.0 - cer)
+        return self.calculate_cer_accuracy(text1, text2)
     
     def calculate_ocr_metrics(self, reference: str, hypothesis: str) -> Dict[str, float]:
         """

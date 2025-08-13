@@ -157,7 +157,7 @@ class ExcelResultGenerator:
         analysis_rows.append(['模型', model_name if model_name else '', 'valueSetId', value_set_id if value_set_id else '', ''])
 
         # 第二行：欄位標題
-        analysis_rows.append(['受編', '欄位', '準確度', 'CER', 'WER'])
+        analysis_rows.append(['受編', '欄位', '準確度', 'CER準確率', 'WER準確率'])
 
         # 後續資料行
         for evaluation in record_evaluations:
@@ -167,10 +167,21 @@ class ExcelResultGenerator:
             # 各欄位的準確度和OCR指標
             for field_name, field_result in evaluation.field_results.items():
                 accuracy_percentage = f"{field_result.similarity:.1%}"
-                cer_percentage = f"{field_result.cer:.1%}" if hasattr(field_result, 'cer') else 'N/A'
-                wer_percentage = f"{field_result.wer:.1%}" if hasattr(field_result, 'wer') else 'N/A'
-                
-                analysis_rows.append(['', str(field_name), accuracy_percentage, cer_percentage, wer_percentage])
+
+                # 計算CER和WER準確率（1 - 錯誤率）
+                if hasattr(field_result, 'cer') and field_result.cer is not None:
+                    cer_accuracy = max(0.0, 1.0 - field_result.cer)
+                    cer_accuracy_percentage = f"{cer_accuracy:.1%}"
+                else:
+                    cer_accuracy_percentage = 'N/A'
+
+                if hasattr(field_result, 'wer') and field_result.wer is not None:
+                    wer_accuracy = max(0.0, 1.0 - field_result.wer)
+                    wer_accuracy_percentage = f"{wer_accuracy:.1%}"
+                else:
+                    wer_accuracy_percentage = 'N/A'
+
+                analysis_rows.append(['', str(field_name), accuracy_percentage, cer_accuracy_percentage, wer_accuracy_percentage])
 
             # 整體準確度行
             analysis_rows.append(['', '整體準確度', f"{evaluation.overall_accuracy:.2%}", '', ''])
@@ -179,7 +190,7 @@ class ExcelResultGenerator:
             analysis_rows.append(['', '--- 分隔線 ---', '', '', ''])
 
         # 轉為DataFrame並輸出（不使用header，因為我們已經手動加入了標題行）
-        analysis_df = pd.DataFrame(analysis_rows, columns=['受編', '欄位', '準確度', 'CER', 'WER'])
+        analysis_df = pd.DataFrame(analysis_rows, columns=['受編', '欄位', '準確度', 'CER準確率', 'WER準確率'])
         self._safe_dataframe_to_excel(analysis_df, writer, sheet_name, header=False)
 
     def _extract_model_name_from_filename(self, filename: str) -> str:
