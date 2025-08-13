@@ -40,6 +40,8 @@ class RecordFieldResult:
     predicted_value: str
     similarity: float
     is_exact_match: bool
+    cer: float = 0.0  # 字元錯誤率
+    wer: float = 0.0  # 單詞錯誤率
 
 @dataclass
 class RecordEvaluation:
@@ -69,31 +71,113 @@ class DisabilityDataEvaluator:
         }
     
     def normalize_text(self, text: str) -> str:
-        """標準化文字處理"""
+        """標準化文字處理（OCR專用，保留原始字元）"""
         if pd.isna(text) or text is None:
             return ""
         
         text = str(text).strip()
-        # 移除多餘的空格和特殊字符
+        # 移除多餘的空格，但保留原始字元用於精確OCR評估
         text = re.sub(r'\s+', '', text)
-        # 統一括號格式
-        text = text.replace('【', '[').replace('】', ']')
-        text = text.replace('（', '(').replace('）', ')')
-        return text.lower()
+        # 不進行括號轉換，保持原始字元以進行精確的OCR評估
+        return text
+    
+    def calculate_cer(self, reference: str, hypothesis: str) -> float:
+        """
+        計算字元錯誤率 (Character Error Rate, CER)
+        CER = (S + D + I) / N
+        其中 S=替換, D=刪除, I=插入, N=參考文字字元數
+        """
+        ref_norm = self.normalize_text(reference)
+        hyp_norm = self.normalize_text(hypothesis)
+        
+        if not ref_norm and not hyp_norm:
+            return 0.0
+        if not ref_norm:
+            return 1.0 if hyp_norm else 0.0
+        if not hyp_norm:
+            return 1.0
+        
+        # 使用編輯距離計算字元級錯誤
+        edits = difflib.SequenceMatcher(None, ref_norm, hyp_norm).get_opcodes()
+        
+        substitutions = 0
+        deletions = 0
+        insertions = 0
+        
+        for op, i1, i2, j1, j2 in edits:
+            if op == 'replace':
+                substitutions += max(i2 - i1, j2 - j1)
+            elif op == 'delete':
+                deletions += i2 - i1
+            elif op == 'insert':
+                insertions += j2 - j1
+        
+        total_errors = substitutions + deletions + insertions
+        return total_errors / len(ref_norm) if len(ref_norm) > 0 else 0.0
+    
+    def calculate_wer(self, reference: str, hypothesis: str) -> float:
+        """
+        計算單詞錯誤率 (Word Error Rate, WER)
+        WER = (S + D + I) / N
+        其中 S=替換, D=刪除, I=插入, N=參考文字單詞數
+        
+        對於中文，將每個字符視為一個"單詞"
+        """
+        ref_norm = self.normalize_text(reference)
+        hyp_norm = self.normalize_text(hypothesis)
+        
+        if not ref_norm and not hyp_norm:
+            return 0.0
+        if not ref_norm:
+            return 1.0 if hyp_norm else 0.0
+        if not hyp_norm:
+            return 1.0
+        
+        # 對於中文文字，將每個字符視為一個單詞
+        ref_words = list(ref_norm)
+        hyp_words = list(hyp_norm)
+        
+        # 使用編輯距離計算單詞級錯誤
+        edits = difflib.SequenceMatcher(None, ref_words, hyp_words).get_opcodes()
+        
+        substitutions = 0
+        deletions = 0
+        insertions = 0
+        
+        for op, i1, i2, j1, j2 in edits:
+            if op == 'replace':
+                substitutions += max(i2 - i1, j2 - j1)
+            elif op == 'delete':
+                deletions += i2 - i1
+            elif op == 'insert':
+                insertions += j2 - j1
+        
+        total_errors = substitutions + deletions + insertions
+        return total_errors / len(ref_words) if len(ref_words) > 0 else 0.0
     
     def calculate_similarity(self, text1: str, text2: str) -> float:
-        """計算兩個文字的相似度"""
-        norm_text1 = self.normalize_text(text1)
-        norm_text2 = self.normalize_text(text2)
+        """
+        計算兩個文字的相似度（基於CER的準確度）
+        準確度 = 1 - CER
+        """
+        cer = self.calculate_cer(text1, text2)
+        return max(0.0, 1.0 - cer)
+    
+    def calculate_ocr_metrics(self, reference: str, hypothesis: str) -> Dict[str, float]:
+        """
+        計算OCR評估的完整指標
+        返回: CER, WER, 以及基於CER的準確度
+        """
+        cer = self.calculate_cer(reference, hypothesis)
+        wer = self.calculate_wer(reference, hypothesis)
+        accuracy = max(0.0, 1.0 - cer)
         
-        if not norm_text1 and not norm_text2:
-            return 1.0
-        if not norm_text1 or not norm_text2:
-            return 0.0
-        
-        # 使用SequenceMatcher計算相似度
-        similarity = difflib.SequenceMatcher(None, norm_text1, norm_text2).ratio()
-        return similarity
+        return {
+            'cer': cer,
+            'wer': wer,
+            'accuracy': accuracy,
+            'similarity': accuracy  # 保持向後兼容性
+        }
     
     def evaluate_field(self, correct_values: List[str], 
                       predicted_values: List[str], 
@@ -131,10 +215,31 @@ class DisabilityDataEvaluator:
         results = {}
 
         for field_name, (correct_col, predicted_col) in self.field_mappings.items():
-            if correct_col in df.columns and predicted_col in df.columns:
+            # 檢查欄位是否存在（支援索引和名稱）
+            correct_exists = False
+            predicted_exists = False
+
+            if isinstance(correct_col, int):
+                correct_exists = correct_col < len(df.columns)
+            else:
+                correct_exists = correct_col in df.columns
+
+            if isinstance(predicted_col, int):
+                predicted_exists = predicted_col < len(df.columns)
+            else:
+                predicted_exists = predicted_col in df.columns
+
+            if correct_exists and predicted_exists:
                 # 檢查欄位是否有實際資料
-                correct_data = df[correct_col].dropna()
-                predicted_data = df[predicted_col].dropna()
+                if isinstance(correct_col, int):
+                    correct_data = df.iloc[:, correct_col].dropna()
+                else:
+                    correct_data = df[correct_col].dropna()
+
+                if isinstance(predicted_col, int):
+                    predicted_data = df.iloc[:, predicted_col].dropna()
+                else:
+                    predicted_data = df[predicted_col].dropna()
 
                 if len(correct_data) == 0:
                     print(f"警告: 正確答案欄位 {correct_col} 沒有資料")
@@ -143,8 +248,28 @@ class DisabilityDataEvaluator:
                     print(f"警告: 預測結果欄位 {predicted_col} 沒有資料")
                     continue
 
-                correct_values = df[correct_col].tolist()
-                predicted_values = df[predicted_col].tolist()
+                # 處理欄位映射（支援索引和名稱）
+                if isinstance(correct_col, int):
+                    # 如果是索引，直接使用iloc
+                    correct_values = df.iloc[:, correct_col].tolist()
+                else:
+                    # 如果是欄位名稱，處理重複欄位名稱的情況
+                    correct_data = df[correct_col]
+                    if isinstance(correct_data, pd.DataFrame):
+                        correct_values = correct_data.iloc[:, 0].tolist()
+                    else:
+                        correct_values = correct_data.tolist()
+
+                if isinstance(predicted_col, int):
+                    # 如果是索引，直接使用iloc
+                    predicted_values = df.iloc[:, predicted_col].tolist()
+                else:
+                    # 如果是欄位名稱，處理重複欄位名稱的情況
+                    predicted_data = df[predicted_col]
+                    if isinstance(predicted_data, pd.DataFrame):
+                        predicted_values = predicted_data.iloc[:, 1].tolist() if predicted_data.shape[1] > 1 else predicted_data.iloc[:, 0].tolist()
+                    else:
+                        predicted_values = predicted_data.tolist()
 
                 result = self.evaluate_field(correct_values, predicted_values, field_name)
                 results[field_name] = result
@@ -177,7 +302,7 @@ class DisabilityDataEvaluator:
         
         return total_weighted_accuracy / total_weight if total_weight > 0 else 0.0
     
-    def evaluate_record_fields(self, record_data: Dict[str, Tuple[str, str]], 
+    def evaluate_record_fields(self, record_data: Dict[str, Tuple[str, str]],
                               record_id: str, subject_id: str = None) -> RecordEvaluation:
         """評估單筆記錄中每個欄位的準確度"""
         field_results = {}
@@ -185,8 +310,12 @@ class DisabilityDataEvaluator:
         matched_count = 0
         
         for field_name, (correct_value, predicted_value) in record_data.items():
-            # 計算相似度
-            similarity = self.calculate_similarity(correct_value, predicted_value)
+            # 計算OCR指標
+            ocr_metrics = self.calculate_ocr_metrics(correct_value, predicted_value)
+            similarity = ocr_metrics['accuracy']
+            cer = ocr_metrics['cer']
+            wer = ocr_metrics['wer']
+            
             is_exact_match = similarity >= 0.99
             
             if is_exact_match:
@@ -200,7 +329,9 @@ class DisabilityDataEvaluator:
                 correct_value=str(correct_value) if correct_value is not None else '',
                 predicted_value=str(predicted_value) if predicted_value is not None else '',
                 similarity=similarity,
-                is_exact_match=is_exact_match
+                is_exact_match=is_exact_match,
+                cer=cer,
+                wer=wer
             )
             
             field_results[field_name] = field_result
@@ -224,6 +355,8 @@ class DisabilityDataEvaluator:
         if field_mappings is None:
             field_mappings = self.field_mappings
 
+
+
         record_evaluations = []
 
         for index, row in df.iterrows():
@@ -235,32 +368,73 @@ class DisabilityDataEvaluator:
             record_data = {}
 
             for field_name, (correct_col, predicted_col) in field_mappings.items():
-                if correct_col in df.columns and predicted_col in df.columns:
-                    correct_value = row.get(correct_col)
-                    predicted_value = row.get(predicted_col)
+                # 檢查欄位是否存在（支援索引和名稱）
+                correct_exists = False
+                predicted_exists = False
+
+                if isinstance(correct_col, int):
+                    correct_exists = correct_col < len(df.columns)
+                else:
+                    correct_exists = correct_col in df.columns
+
+                if isinstance(predicted_col, int):
+                    predicted_exists = predicted_col < len(df.columns)
+                else:
+                    predicted_exists = predicted_col in df.columns
+
+                if correct_exists and predicted_exists:
+                    # 取得欄位值（支援索引和名稱）
+                    if isinstance(correct_col, int):
+                        correct_value = row.iloc[correct_col]
+                    else:
+                        correct_value = row.get(correct_col)
+
+                    if isinstance(predicted_col, int):
+                        predicted_value = row.iloc[predicted_col]
+                    else:
+                        predicted_value = row.get(predicted_col)
 
                     # 檢查是否有實際資料（不是NaN或空值）
                     if pd.notna(correct_value) and pd.notna(predicted_value):
-                        record_data[field_name] = (correct_value, predicted_value)
+                        record_data[field_name] = (str(correct_value), str(predicted_value))
                     elif pd.notna(correct_value) and pd.isna(predicted_value):
                         # 有正確答案但沒有預測結果，記錄為0分
-                        record_data[field_name] = (correct_value, "")
+                        record_data[field_name] = (str(correct_value), "")
                     # 如果正確答案也是空的，就跳過這個欄位
 
             if record_data:
                 # 評估本筆記錄
                 evaluation = self.evaluate_record_fields(record_data, record_id, subject_id)
                 record_evaluations.append(evaluation)
-
         return record_evaluations
     
     def get_improvement_suggestion(self, field_result: RecordFieldResult) -> str:
-        """為欄位錯誤提供改進建議"""
-        if field_result.similarity > 0.8:
-            return "格式標準化 - 相似度高，主要是格式問題"
-        elif field_result.similarity > 0.5:
-            return "內容檢查 - 部分正確，需要細節調整"
-        elif field_result.similarity > 0.2:
-            return "重新訓練 - 識別錯誤，需要加強相關資料訓練"
+        """為欄位錯誤提供改進建議（基於CER）"""
+        cer = field_result.cer
+        wer = field_result.wer
+        
+        if cer == 0.0:
+            return "完美識別 - 無需改進"
+        elif cer <= 0.1:
+            return "優秀識別 - 僅有微小錯誤，可能是格式問題"
+        elif cer <= 0.2:
+            return "良好識別 - 少量字元錯誤，建議檢查OCR預處理"
+        elif cer <= 0.4:
+            return "普通識別 - 中等程度錯誤，需要改進訓練資料品質"
+        elif cer <= 0.6:
+            return "較差識別 - 較多字元錯誤，建議增加相似樣本訓練"
         else:
-            return "完全重做 - 識別失敗，需要重新處理或手動檢查"
+            return "差劣識別 - 嚴重錯誤，需要重新檢查輸入資料或模型"
+    
+    def get_ocr_performance_level(self, cer: float) -> str:
+        """根據CER判斷OCR性能等級"""
+        if cer <= 0.05:
+            return "優秀"
+        elif cer <= 0.1:
+            return "良好"
+        elif cer <= 0.2:
+            return "可接受"
+        elif cer <= 0.4:
+            return "需改進"
+        else:
+            return "不合格"

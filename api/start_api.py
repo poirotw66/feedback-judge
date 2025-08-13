@@ -17,16 +17,17 @@ def main():
     print("=" * 60)
     
     # 檢查必要檔案
+    script_dir = os.path.dirname(os.path.abspath(__file__))
     required_files = [
         "app.py",
-        "evaluator_core.py", 
+        "evaluator_core.py",
         "evaluator_service.py",
         "excel_generator.py",
         "models.py",
         "exceptions.py"
     ]
-    
-    missing_files = [f for f in required_files if not os.path.exists(f)]
+
+    missing_files = [f for f in required_files if not os.path.exists(os.path.join(script_dir, f))]
     if missing_files:
         print(f"❌ 缺少必要檔案: {missing_files}")
         sys.exit(1)
@@ -56,7 +57,7 @@ def main():
     
     try:
         uvicorn.run(
-            "app:app",
+            "api.app:app",
             host=host,
             port=port,
             reload=reload,

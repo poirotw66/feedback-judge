@@ -12,8 +12,8 @@ from typing import Dict, List, Any
 import logging
 from datetime import datetime
 
-from evaluator_core import EvaluationResult, RecordEvaluation
-from exceptions import ExcelGenerationError
+from .evaluator_core import EvaluationResult, RecordEvaluation
+from .exceptions import ExcelGenerationError
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,66 @@ class ExcelResultGenerator:
     
     def __init__(self):
         pass
+    
+    async def generate_multi_model_excel(self,
+                                       model_results: Dict[str, Dict],
+                                       processing_time: float,
+                                       original_filename: str,
+                                       original_file_content: bytes = None) -> bytes:
+        """
+        生成包含多個模型評估結果的Excel檔案，每個模型一個sheet
+        
+        Args:
+            model_results: {模型名稱: {data, field_results, record_evaluations, overall_accuracy}}
+            processing_time: 處理時間
+            original_filename: 原始檔案名稱
+            original_file_content: 原始檔案內容
+            
+        Returns:
+            bytes: Excel檔案內容
+        """
+        try:
+            output = io.BytesIO()
+            logger.info(f"開始生成多模型Excel檔案，包含 {len(model_results)} 個模型...")
+
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                for model_name, results in model_results.items():
+                    try:
+                        logger.info(f"生成模型 {model_name} 的工作表...")
+                        
+                        # 清理模型名稱作為sheet名稱
+                        safe_sheet_name = self._clean_sheet_name(model_name)
+                        
+                        # 為每個模型生成簡化的個別記錄分析工作表
+                        self._create_simplified_individual_analysis_sheet(
+                            writer, 
+                            results['record_evaluations'], 
+                            model_name=model_name,
+                            sheet_name=safe_sheet_name
+                        )
+                        
+                    except Exception as sheet_error:
+                        logger.error(f"生成模型 {model_name} 工作表時發生錯誤: {sheet_error}")
+                        # 創建錯誤工作表
+                        error_df = pd.DataFrame({
+                            '錯誤報告': [f'模型 {model_name} 處理錯誤: {str(sheet_error)}'],
+                            '時間': [datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
+                        })
+                        error_sheet_name = self._clean_sheet_name(f'錯誤_{model_name[:10]}')
+                        error_df.to_excel(writer, sheet_name=error_sheet_name, index=False)
+
+            output.seek(0)
+            result = output.read()
+
+            if len(result) == 0:
+                raise ValueError("生成的Excel檔案為空")
+
+            logger.info(f"多模型Excel檔案生成成功，大小: {len(result)} bytes")
+            return result
+
+        except Exception as e:
+            logger.error(f"生成多模型Excel檔案時發生錯誤: {str(e)}")
+            raise ExcelGenerationError(f"生成多模型Excel檔案時發生錯誤: {str(e)}")
     
     async def generate_result_excel(self,
                                   original_data: pd.DataFrame,
@@ -83,35 +143,39 @@ class ExcelResultGenerator:
             logger.error(f"生成Excel檔案時發生錯誤: {str(e)}")
             raise ExcelGenerationError(f"生成Excel檔案時發生錯誤: {str(e)}")
 
-    def _create_simplified_individual_analysis_sheet(self, writer: pd.ExcelWriter, record_evaluations: List[RecordEvaluation], model_name: str = None):
-        """建立簡化的個別記錄分析頁 - 僅包含受編、欄位、準確度三欄，並在頂部加入模型名稱列"""
+    def _create_simplified_individual_analysis_sheet(self, writer: pd.ExcelWriter, record_evaluations: List[RecordEvaluation], 
+                                                    model_name: str = None, sheet_name: str = '個別記錄分析'):
+        """建立簡化的個別記錄分析頁 - 包含OCR評估指標：準確度、CER、WER"""
         analysis_rows = []
 
         # 第一行：模型名稱（A1="模型", B1=模型名稱, C1 空白）
-        analysis_rows.append(['模型', model_name if model_name else '', ''])
+        analysis_rows.append(['模型', model_name if model_name else '', '', '', ''])
 
         # 第二行：欄位標題
-        analysis_rows.append(['受編', '欄位', '準確度'])
+        analysis_rows.append(['受編', '欄位', '準確度', 'CER', 'WER'])
 
         # 後續資料行
         for evaluation in record_evaluations:
             # 受編行
-            analysis_rows.append([str(evaluation.subject_id) if evaluation.subject_id is not None else '', '', ''])
+            analysis_rows.append([str(evaluation.subject_id) if evaluation.subject_id is not None else '', '', '', '', ''])
 
-            # 各欄位的準確度
+            # 各欄位的準確度和OCR指標
             for field_name, field_result in evaluation.field_results.items():
                 accuracy_percentage = f"{field_result.similarity:.1%}"
-                analysis_rows.append(['', str(field_name), accuracy_percentage])
+                cer_percentage = f"{field_result.cer:.1%}" if hasattr(field_result, 'cer') else 'N/A'
+                wer_percentage = f"{field_result.wer:.1%}" if hasattr(field_result, 'wer') else 'N/A'
+                
+                analysis_rows.append(['', str(field_name), accuracy_percentage, cer_percentage, wer_percentage])
 
             # 整體準確度行
-            analysis_rows.append(['', '整體準確度', f"{evaluation.overall_accuracy:.2%}"])
+            analysis_rows.append(['', '整體準確度', f"{evaluation.overall_accuracy:.2%}", '', ''])
 
             # 分隔線
-            analysis_rows.append(['', '--- 分隔線 ---', ''])
+            analysis_rows.append(['', '--- 分隔線 ---', '', '', ''])
 
         # 轉為DataFrame並輸出（不使用header，因為我們已經手動加入了標題行）
-        analysis_df = pd.DataFrame(analysis_rows, columns=['受編', '欄位', '準確度'])
-        self._safe_dataframe_to_excel(analysis_df, writer, '個別記錄分析', header=False)
+        analysis_df = pd.DataFrame(analysis_rows, columns=['受編', '欄位', '準確度', 'CER', 'WER'])
+        self._safe_dataframe_to_excel(analysis_df, writer, sheet_name, header=False)
 
     def _extract_model_name_from_filename(self, filename: str) -> str:
         """從檔名中抽取模型名稱，依據指定規則"""
@@ -410,7 +474,7 @@ class ExcelResultGenerator:
                 '整體準確度': f"{evaluation.overall_accuracy:.2%}",
                 '完全匹配欄位數': evaluation.matched_fields,
                 '總欄位數': evaluation.total_fields,
-                '匹配率': f"{evaluation.matched_fields/evaluation.total_fields:.1%}" if evaluation.total_fields > 0 else "0%",
+                '匹配率': f"{evaluation.matched_fields / evaluation.total_fields:.1%}" if evaluation.total_fields > 0 else "0%",
                 '狀態描述': f"({evaluation.matched_fields}/{evaluation.total_fields} 完全匹配)",
                 '表現等級': self._get_performance_level(evaluation.overall_accuracy)
             })
@@ -544,7 +608,24 @@ class ExcelResultGenerator:
             return '完全不符'
     
     def _get_improvement_suggestion(self, field_result) -> str:
-        """取得改進建議"""
+        """取得OCR改進建議（基於CER和WER）"""
+        # 如果field_result有cer屬性，使用OCR建議
+        if hasattr(field_result, 'cer'):
+            cer = field_result.cer
+            if cer == 0.0:
+                return "完美識別 - 無需改進"
+            elif cer <= 0.1:
+                return "優秀識別 - 僅有微小錯誤，可能是格式問題"
+            elif cer <= 0.2:
+                return "良好識別 - 少量字元錯誤，建議檢查OCR預處理"
+            elif cer <= 0.4:
+                return "普通識別 - 中等程度錯誤，需要改進訓練資料品質"
+            elif cer <= 0.6:
+                return "較差識別 - 較多字元錯誤，建議增加相似樣本訓練"
+            else:
+                return "差劣識別 - 嚴重錯誤，需要重新檢查輸入資料或模型"
+        
+        # 向後兼容：如果沒有CER，使用原來的相似度建議
         if field_result.similarity > 0.8:
             return "格式標準化 - 相似度高，主要是格式問題"
         elif field_result.similarity > 0.5:

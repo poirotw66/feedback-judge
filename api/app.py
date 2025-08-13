@@ -16,9 +16,9 @@ import logging
 from datetime import datetime
 
 # Import our core evaluator
-from evaluator_service import DisabilityDataEvaluatorService
-from models import EvaluationResponse, ErrorResponse
-from exceptions import (
+from .evaluator_service import DisabilityDataEvaluatorService
+from .models import EvaluationResponse, ErrorResponse
+from .exceptions import (
     EvaluatorException, FileValidationError, FileProcessingError,
     DataValidationError, EvaluationError, ExcelGenerationError,
     file_validation_http_exception, file_processing_http_exception,
