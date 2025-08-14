@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 API_HOST=${API_HOST:-"0.0.0.0"}
-API_PORT=${API_PORT:-8000}
+API_PORT=${API_PORT:-8003}
 CONDA_ENV_NAME=${CONDA_ENV_NAME:-"crawl4ai"}
 
 # Function to print colored output

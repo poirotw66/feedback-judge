@@ -11,12 +11,16 @@ from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
 import io
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import logging
 from datetime import datetime
 
-# Import our core evaluator
+# Import our core evaluators
 from .evaluator_service import DisabilityDataEvaluatorService
+# from .document_evaluator_core import DocumentDataEvaluator
+# from .document_excel_generator import DocumentExcelGenerator
+from .test_data_evaluator import TestDataEvaluator
+from .test_excel_generator import TestExcelGenerator
 from .models import EvaluationResponse, ErrorResponse
 from .exceptions import (
     EvaluatorException, FileValidationError, FileProcessingError,
@@ -48,8 +52,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize the evaluator service
+# Initialize the evaluator services
 evaluator_service = DisabilityDataEvaluatorService()
+test_evaluator = TestDataEvaluator()
+test_excel_generator = TestExcelGenerator()
 
 @app.get("/")
 async def root():
@@ -59,7 +65,10 @@ async def root():
         "description": "身心障礙手冊AI測試結果準確度評分系統",
         "version": "1.0.0",
         "endpoints": {
-            "evaluate": "/evaluate - POST endpoint for accuracy evaluation",
+            "evaluate": "/evaluate - POST endpoint for disability certificate accuracy evaluation",
+            "evaluate-document": "/evaluate-document - POST endpoint for external document accuracy evaluation",
+            "evaluate-test": "/evaluate-test - POST endpoint for test data evaluation",
+            "evaluate-fixed-test": "/evaluate-fixed-test - GET endpoint for fixed test file evaluation",
             "health": "/health - Health check endpoint",
             "docs": "/docs - API documentation"
         }
@@ -164,6 +173,48 @@ async def evaluate_accuracy(
             }
         )
 
+async def process_test_data_file(file_content: bytes, filename: str) -> Tuple[bytes, str]:
+    """
+    Process test data file and return evaluation results
+    處理測試資料檔案並返回評估結果
+    """
+    import time
+    start_time = time.time()
+    
+    try:
+        # Read Excel file from memory
+        file_buffer = io.BytesIO(file_content)
+        df = pd.read_excel(file_buffer, engine='openpyxl', header=None)
+        
+        if df is None or df.empty:
+            raise FileProcessingError("無法讀取Excel檔案或檔案為空", filename)
+        
+        logger.info(f"成功載入測試資料檔案，共 {len(df)} 筆記錄")
+        
+        # Evaluate test data
+        evaluation_results = test_evaluator.evaluate_test_data(df)
+        
+        processing_time = time.time() - start_time
+        
+        # Generate result Excel file
+        result_content = await test_excel_generator.generate_test_result_excel(
+            original_data=df,
+            evaluation_results=evaluation_results,
+            original_filename=filename,
+            processing_time=processing_time
+        )
+        
+        # Generate output filename
+        base_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
+        output_filename = f"{base_name}_評估結果_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        
+        logger.info(f"測試資料評估完成，處理時間: {processing_time:.2f}秒")
+        return result_content, output_filename
+        
+    except Exception as e:
+        logger.error(f"處理測試資料檔案時發生錯誤: {str(e)}")
+        raise EvaluationError(f"處理測試資料檔案時發生未預期的錯誤: {str(e)}")
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     """Custom HTTP exception handler"""
@@ -218,6 +269,68 @@ async def general_exception_handler(request: Request, exc: Exception):
             }
         }
     )
+
+
+@app.post("/evaluate-document")
+async def evaluate_document(
+    file: UploadFile = File(..., description="外來函文Excel檔案")
+):
+    """
+    外來函文AI測試結果準確度評估端點
+    External Document AI Test Results Accuracy Evaluation Endpoint
+    """
+    try:
+        logger.info(f"收到外來函文評估請求: {file.filename}")
+        
+        # 驗證檔案類型
+        if not file.filename.endswith(('.xlsx', '.xls')):
+            raise HTTPException(
+                status_code=400, 
+                detail="檔案格式錯誤，請上傳Excel檔案 (.xlsx 或 .xls)"
+            )
+        
+        # 讀取檔案內容
+        file_content = await file.read()
+        
+        # 創建評估器 (暫時使用簡化版本)
+        # TODO: 實現完整的外來函文評估邏輯
+        # evaluator = DocumentDataEvaluator()
+        # excel_generator = DocumentExcelGenerator()
+        
+        # 處理檔案
+        df = pd.read_excel(io.BytesIO(file_content))
+        logger.info(f"成功讀取外來函文檔案，資料形狀: {df.shape}")
+        
+        # 暫時返回基本資訊
+        total_records = len(df) - 1  # 扣除標題行
+        
+        # 處理NaN值，轉換為JSON友好格式
+        sample_data = df.head(3).fillna("").to_dict('records') if len(df) > 0 else []
+        
+        # 返回簡化的評估結果
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "外來函文檔案已成功上傳並分析",
+                "total_records": total_records,
+                "file_shape": list(df.shape),  # 轉換為list避免JSON序列化問題
+                "columns": [str(col) for col in df.columns],  # 確保所有列名都是字符串
+                "sample_data": sample_data,
+                "note": "外來函文評估功能正在開發中，目前僅提供檔案分析",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"外來函文評估過程中發生錯誤: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"外來函文評估失敗: {str(e)}"
+        )
+
 
 if __name__ == "__main__":
     import uvicorn
