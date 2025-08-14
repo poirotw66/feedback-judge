@@ -17,6 +17,7 @@ from datetime import datetime
 
 # Import our core evaluators
 from .evaluator_service import DisabilityDataEvaluatorService
+from .document_evaluator_service import DocumentEvaluatorService
 # from .document_evaluator_core import DocumentDataEvaluator
 # from .document_excel_generator import DocumentExcelGenerator
 from .test_data_evaluator import TestDataEvaluator
@@ -271,7 +272,7 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 
-@app.post("/evaluate-document")
+@app.post("/evaluate-document", tags=["外來函文評估"])
 async def evaluate_document(
     file: UploadFile = File(..., description="外來函文Excel檔案")
 ):
@@ -283,47 +284,66 @@ async def evaluate_document(
         logger.info(f"收到外來函文評估請求: {file.filename}")
         
         # 驗證檔案類型
-        if not file.filename.endswith(('.xlsx', '.xls')):
+        if not file.filename or not file.filename.lower().endswith(('.xlsx', '.xls')):
             raise HTTPException(
-                status_code=400, 
-                detail="檔案格式錯誤，請上傳Excel檔案 (.xlsx 或 .xls)"
+                status_code=422,
+                detail="只支援 Excel 檔案格式 (.xlsx, .xls)"
+            )
+        
+        # 檢查檔案大小
+        if file.size and file.size > 50 * 1024 * 1024:  # 50MB
+            raise HTTPException(
+                status_code=422,
+                detail="檔案大小不能超過 50MB"
             )
         
         # 讀取檔案內容
         file_content = await file.read()
         
-        # 創建評估器 (暫時使用簡化版本)
-        # TODO: 實現完整的外來函文評估邏輯
-        # evaluator = DocumentDataEvaluator()
-        # excel_generator = DocumentExcelGenerator()
+        if len(file_content) == 0:
+            raise HTTPException(
+                status_code=422,
+                detail="檔案為空，請上傳有效的Excel檔案"
+            )
         
-        # 處理檔案
-        df = pd.read_excel(io.BytesIO(file_content))
-        logger.info(f"成功讀取外來函文檔案，資料形狀: {df.shape}")
+        logger.info(f"開始處理外來函文檔案: {file.filename}, 大小: {len(file_content)} bytes")
         
-        # 暫時返回基本資訊
-        total_records = len(df) - 1  # 扣除標題行
+        # 使用外來函文評估服務
+        document_service = DocumentEvaluatorService()
+        result_content, output_filename = await document_service.process_document_file(
+            file_content, file.filename
+        )
         
-        # 處理NaN值，轉換為JSON友好格式
-        sample_data = df.head(3).fillna("").to_dict('records') if len(df) > 0 else []
+        logger.info(f"外來函文評估完成: {file.filename}")
         
-        # 返回簡化的評估結果
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "message": "外來函文檔案已成功上傳並分析",
-                "total_records": total_records,
-                "file_shape": list(df.shape),  # 轉換為list避免JSON序列化問題
-                "columns": [str(col) for col in df.columns],  # 確保所有列名都是字符串
-                "sample_data": sample_data,
-                "note": "外來函文評估功能正在開發中，目前僅提供檔案分析",
-                "timestamp": datetime.now().isoformat()
+        # 返回Excel結果檔案
+        from urllib.parse import quote
+        encoded_filename = quote(output_filename.encode('utf-8'))
+        
+        return StreamingResponse(
+            io.BytesIO(result_content),
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
+                "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "Access-Control-Expose-Headers": "Content-Disposition"
             }
         )
         
     except HTTPException:
         raise
+    except FileValidationError as e:
+        logger.warning(f"檔案驗證錯誤: {str(e)}")
+        raise HTTPException(status_code=422, detail=str(e))
+    except FileProcessingError as e:
+        logger.error(f"檔案處理錯誤: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    except DataValidationError as e:
+        logger.error(f"資料驗證錯誤: {str(e)}")
+        raise HTTPException(status_code=422, detail=str(e))
+    except EvaluationError as e:
+        logger.error(f"評估錯誤: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         logger.error(f"外來函文評估過程中發生錯誤: {str(e)}")
         raise HTTPException(
