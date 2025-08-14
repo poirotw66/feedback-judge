@@ -84,7 +84,7 @@ async def health_check():
         "service": "Disability Certificate AI Accuracy Evaluator"
     }
 
-@app.post("/evaluate")
+@app.post("/evaluate", tags=["身心障礙評估"])
 async def evaluate_accuracy(
     file: UploadFile = File(..., description="Excel file (.xlsx or .xls) containing AI test results"),
     valueSetId: str = Form(None, description="Value Set ID for the evaluation")
@@ -274,14 +274,15 @@ async def general_exception_handler(request: Request, exc: Exception):
 
 @app.post("/evaluate-document", tags=["外來函文評估"])
 async def evaluate_document(
-    file: UploadFile = File(..., description="外來函文Excel檔案")
+    file: UploadFile = File(..., description="外來函文Excel檔案"),
+    valueSetId: str = Form(None, description="Value Set ID for the evaluation")
 ):
     """
     外來函文AI測試結果準確度評估端點
     External Document AI Test Results Accuracy Evaluation Endpoint
     """
     try:
-        logger.info(f"收到外來函文評估請求: {file.filename}")
+        logger.info(f"收到外來函文評估請求: {file.filename}, valueSetId: {valueSetId}")
         
         # 驗證檔案類型
         if not file.filename or not file.filename.lower().endswith(('.xlsx', '.xls')):
@@ -311,7 +312,7 @@ async def evaluate_document(
         # 使用外來函文評估服務
         document_service = DocumentEvaluatorService()
         result_content, output_filename = await document_service.process_document_file(
-            file_content, file.filename
+            file_content, file.filename, valueSetId
         )
         
         logger.info(f"外來函文評估完成: {file.filename}")

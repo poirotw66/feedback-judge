@@ -241,7 +241,8 @@ class DocumentEvaluatorService:
     async def process_document_file(
         self,
         file_content: bytes,
-        filename: str
+        filename: str,
+        value_set_id: str = None
     ) -> Tuple[bytes, str]:
         """
         處理外來函文檔案並返回評估結果
@@ -274,7 +275,8 @@ class DocumentEvaluatorService:
             result_content = await self.excel_generator.generate_document_evaluation_report(
                 original_data=df,
                 evaluation_results=evaluation_results,
-                original_filename=filename
+                original_filename=filename,
+                value_set_id=value_set_id
             )
             
             # 生成輸出檔案名稱
