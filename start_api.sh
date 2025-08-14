@@ -1,10 +1,3 @@
-#!/bin/bash
-# -*- coding: utf-8 -*-
-"""
-Startup Script for Disability Certificate AI Accuracy Evaluator API
-身心障礙手冊AI測試結果準確度評分系統 - API啟動腳本
-"""
-
 set -e  # Exit on any error
 
 # Colors for output

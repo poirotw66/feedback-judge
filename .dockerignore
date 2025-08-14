@@ -1,0 +1,84 @@
+# Docker 容器忽略文件
+# 減少 Docker 映像大小，排除不必要的文件
+
+# Python 相關
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git
+.mypy_cache
+.pytest_cache
+.hypothesis
+
+# 開發工具
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系統文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 測試和臨時文件
+test_*.xlsx
+final_test.xlsx
+test_new_format_result.xlsx
+test_with_valueset.xlsx
+*.tmp
+*.temp
+
+# Conda 環境
+.conda/
+
+# Docker 相關
+.dockerignore
+Dockerfile.*
+docker-compose.override.yml
+
+# Git 相關
+.git/
+.gitignore
+
+# 文檔
+README.md
+docs/
+*.md
+
+# 日誌文件
+logs/
+*.log
+
+# 備份文件
+*.bak
+*.backup
+
+# 輸出文件（保留目錄結構但不包含具體文件）
+output/*.xlsx
+!output/.gitkeep
+
+# 環境配置文件
+.env
+.env.local
+.env.production

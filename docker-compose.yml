@@ -1,0 +1,39 @@
+# Docker Compose 配置文件
+# 外來函文AI測試結果準確度評分系統
+
+version: '3.8'
+
+services:
+  feedback-judge-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: feedback-judge-api
+    ports:
+      - "8003:8003"
+    environment:
+      - PYTHONPATH=/app
+      - UVICORN_HOST=0.0.0.0
+      - UVICORN_PORT=8003
+    volumes:
+      # 掛載輸出目錄，用於保存評估結果
+      - ./output:/app/output
+      # 掛載測試數據目錄（可選）
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - feedback-judge-network
+
+networks:
+  feedback-judge-network:
+    driver: bridge
+
+volumes:
+  output-data:
+    driver: local

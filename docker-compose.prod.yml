@@ -1,0 +1,66 @@
+# 生產環境 Docker Compose 配置
+# Production Docker Compose Configuration
+
+version: '3.8'
+
+services:
+  feedback-judge-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: feedback-judge-api-prod
+    ports:
+      - "8003:8003"
+    environment:
+      - PYTHONPATH=/app
+      - UVICORN_HOST=0.0.0.0
+      - UVICORN_PORT=8003
+      - UVICORN_WORKERS=4  # 生產環境使用多個 worker
+      - UVICORN_LOG_LEVEL=info
+    volumes:
+      - ./output:/app/output
+      - ./data:/app/data
+      # 生產環境可以考慮使用 Docker volumes
+      - feedback-judge-output:/app/output
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - feedback-judge-network
+    # 資源限制
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # 可選：添加 nginx 反向代理
+  nginx:
+    image: nginx:alpine
+    container_name: feedback-judge-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro  # SSL 證書目錄
+    depends_on:
+      - feedback-judge-api
+    restart: always
+    networks:
+      - feedback-judge-network
+
+networks:
+  feedback-judge-network:
+    driver: bridge
+
+volumes:
+  feedback-judge-output:
+    driver: local
