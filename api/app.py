@@ -37,11 +37,25 @@ logger = logging.getLogger(__name__)
 
 # Create FastAPI app
 app = FastAPI(
-    title="Disability Certificate AI Accuracy Evaluator",
-    description="身心障礙手冊AI測試結果準確度評分系統 API",
-    version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc"
+    title="AI Document Accuracy Evaluator",
+    description="AI文件辨識準確度評分系統 API",
+    version="2.0.0",
+    docs_url="/feedback-service/docs",
+    redoc_url="/feedback-service/redoc",
+    tags_metadata=[
+        {
+            "name": "評估服務",
+            "description": "AI文件評估相關端點",
+        },
+        {
+            "name": "身心障礙評估",
+            "description": "身心障礙手冊AI測試結果準確度評估",
+        },
+        {
+            "name": "外來函文評估",
+            "description": "外來函文OCR辨識準確度評估",
+        },
+    ]
 )
 
 router = APIRouter(
