@@ -35,7 +35,7 @@ EXPOSE 8003
 
 # 健康檢查
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8003/health || exit 1
+    CMD curl -f http://localhost:8003/feedback-service/health || exit 1
 
 # 設置啟動命令
 CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8003", "--workers", "1"]

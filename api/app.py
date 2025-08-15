@@ -5,7 +5,7 @@ FastAPI Application for Disability Certificate AI Test Results Accuracy Evaluati
 身心障礙手冊AI測試結果準確度評分系統 - FastAPI版本
 """
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Response, Request
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Response, Request, APIRouter
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
@@ -44,6 +44,12 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+router = APIRouter(
+    prefix="/feedback-service",
+    tags=["評估服務"],
+    responses={404: {"description": "Not found"}}
+)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -58,24 +64,24 @@ evaluator_service = DisabilityDataEvaluatorService()
 test_evaluator = TestDataEvaluator()
 test_excel_generator = TestExcelGenerator()
 
-@app.get("/")
+@router.get("/")
 async def root():
     """Root endpoint with API information"""
     return {
-        "message": "Disability Certificate AI Accuracy Evaluator API",
-        "description": "身心障礙手冊AI測試結果準確度評分系統",
-        "version": "1.0.0",
+        "message": "AI Document Accuracy Evaluator API",
+        "description": "AI文件辨識準確度評分系統",
+        "version": "2.0.0",
         "endpoints": {
-            "evaluate": "/evaluate - POST endpoint for disability certificate accuracy evaluation",
-            "evaluate-document": "/evaluate-document - POST endpoint for external document accuracy evaluation",
-            "evaluate-test": "/evaluate-test - POST endpoint for test data evaluation",
-            "evaluate-fixed-test": "/evaluate-fixed-test - GET endpoint for fixed test file evaluation",
-            "health": "/health - Health check endpoint",
-            "docs": "/docs - API documentation"
+            "evaluate": "/feedback-service/evaluate - POST endpoint for disability certificate accuracy evaluation",
+            "evaluate-document": "/feedback-service/evaluate-document - POST endpoint for external document accuracy evaluation",
+            "evaluate-test": "/feedback-service/evaluate-test - POST endpoint for test data evaluation",
+            "evaluate-fixed-test": "/feedback-service/evaluate-fixed-test - GET endpoint for fixed test file evaluation",
+            "health": "/feedback-service/health - Health check endpoint",
+            "docs": "/feedback-service/docs - API documentation"
         }
     }
 
-@app.get("/health")
+@router.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {
@@ -84,7 +90,7 @@ async def health_check():
         "service": "Disability Certificate AI Accuracy Evaluator"
     }
 
-@app.post("/evaluate", tags=["身心障礙評估"])
+@router.post("/evaluate")
 async def evaluate_accuracy(
     file: UploadFile = File(..., description="Excel file (.xlsx or .xls) containing AI test results"),
     valueSetId: str = Form(None, description="Value Set ID for the evaluation")
@@ -272,7 +278,7 @@ async def general_exception_handler(request: Request, exc: Exception):
     )
 
 
-@app.post("/evaluate-document", tags=["外來函文評估"])
+@router.post("/evaluate-document")
 async def evaluate_document(
     file: UploadFile = File(..., description="外來函文Excel檔案"),
     valueSetId: str = Form(None, description="Value Set ID for the evaluation")
@@ -352,6 +358,25 @@ async def evaluate_document(
             detail=f"外來函文評估失敗: {str(e)}"
         )
 
+
+# Include the router in the app
+app.include_router(router)
+
+@app.on_event("startup")
+async def startup_event():
+    """Print service endpoints information on startup"""
+    logger.info("=" * 60)
+    logger.info("🚀 AI Document Accuracy Evaluator API Started")
+    logger.info("=" * 60)
+    logger.info("📋 Service Endpoints:")
+    logger.info("  • 主服務根端點: /feedback-service/")
+    logger.info("  • 健康檢查: /feedback-service/health")
+    logger.info("  • 身心障礙評估: /feedback-service/evaluate")
+    logger.info("  • 外來函文評估: /feedback-service/evaluate-document")
+    logger.info("📖 Documentation:")
+    logger.info("  • Swagger UI: /feedback-service/docs")
+    logger.info("  • ReDoc: /feedback-service/redoc")
+    logger.info("=" * 60)
 
 if __name__ == "__main__":
     import uvicorn
