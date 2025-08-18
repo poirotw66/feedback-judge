@@ -40,6 +40,7 @@ app = FastAPI(
     title="AI Document Accuracy Evaluator",
     description="AI文件辨識準確度評分系統 API",
     version="2.0.0",
+    openapi_url="/openapi.json",
     docs_url="/feedback-service/docs",
     redoc_url="/feedback-service/redoc",
     servers=[
