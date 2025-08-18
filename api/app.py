@@ -40,7 +40,7 @@ app = FastAPI(
     title="AI Document Accuracy Evaluator",
     description="AI文件辨識準確度評分系統 API",
     version="2.0.0",
-    openapi_url="/openapi.json",
+    openapi_url="/feedback-service/openapi.json",
     docs_url="/feedback-service/docs",
     redoc_url="/feedback-service/redoc",
     servers=[
@@ -89,6 +89,31 @@ evaluator_service = DisabilityDataEvaluatorService()
 test_evaluator = TestDataEvaluator()
 test_excel_generator = TestExcelGenerator()
 
+@app.get("/")
+async def app_root():
+    """Main app root endpoint"""
+    return {
+        "message": "AI Document Accuracy Evaluator API",
+        "description": "AI文件辨識準確度評分系統",
+        "version": "2.0.0",
+        "services": {
+            "feedback-service": "/feedback-service - 主要評估服務",
+            "docs": "/feedback-service/docs - API 文檔",
+            "redoc": "/feedback-service/redoc - ReDoc 文檔"
+        },
+        "endpoints": {
+            "health": "/feedback-service/health",
+            "evaluate": "/feedback-service/evaluate",
+            "evaluate-document": "/feedback-service/evaluate-document"
+        }
+    }
+
+@app.get("/openapi.json")
+async def get_openapi_redirect():
+    """Redirect to the actual OpenAPI JSON for backward compatibility"""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/feedback-service/openapi.json")
+
 @router.get("/")
 async def root():
     """Root endpoint with API information"""
@@ -99,8 +124,6 @@ async def root():
         "endpoints": {
             "evaluate": "/feedback-service/evaluate - POST endpoint for disability certificate accuracy evaluation",
             "evaluate-document": "/feedback-service/evaluate-document - POST endpoint for external document accuracy evaluation",
-            "evaluate-test": "/feedback-service/evaluate-test - POST endpoint for test data evaluation",
-            "evaluate-fixed-test": "/feedback-service/evaluate-fixed-test - GET endpoint for fixed test file evaluation",
             "health": "/feedback-service/health - Health check endpoint",
             "docs": "/feedback-service/docs - API documentation"
         }
