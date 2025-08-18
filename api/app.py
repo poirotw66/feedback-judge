@@ -42,6 +42,16 @@ app = FastAPI(
     version="2.0.0",
     docs_url="/feedback-service/docs",
     redoc_url="/feedback-service/redoc",
+    servers=[
+        {
+            "url": "http://localhost:8003",
+            "description": "開發環境"
+        },
+        {
+            "url": "https://dev.irating.info",
+            "description": "生產環境"
+        }
+    ],
     tags_metadata=[
         {
             "name": "評估服務",
