@@ -30,6 +30,149 @@ AI文件辨識準確度評分系統 - FastAPI版本
 - **Docker部署**: 支援容器化部署
 - **健康檢查**: 提供服務健康狀態監控
 
+## 技術架構
+
+### 系統架構圖
+
+```mermaid
+flowchart TB
+    user[使用者 / 客戶端]
+    upload[Excel 檔案上傳]
+    api[FastAPI API 層<br/>Uvicorn]
+    router[路由與請求驗證<br/>/evaluate<br/>/evaluate-document]
+    engine[評估引擎]
+    disability[身心障礙手冊評估<br/>字串相似度]
+    document[外來函文評估<br/>CER / WER]
+    processor[資料處理層<br/>Pandas / NumPy]
+    reader[Excel 讀取<br/>openpyxl / xlrd]
+    writer[Excel 報告輸出<br/>多工作表]
+    output[結果檔案下載]
+    health[健康檢查<br/>/health]
+    docker[Docker / Docker Compose]
+    gcp[GCP Artifact Registry]
+
+    user --> upload --> api
+    api --> router --> engine
+    engine --> disability
+    engine --> document
+    disability --> processor
+    document --> processor
+    processor --> reader
+    processor --> writer
+    writer --> output --> user
+    api --> health
+    api -.部署.-> docker
+    docker -.映像推送.-> gcp
+```
+
+### 文字說明
+
+1. **入口層（API）**：使用者上傳 Excel 檔案到 FastAPI，系統依端點分流到身心障礙手冊評估或外來函文評估流程。  
+2. **評估層（Engine）**：身心障礙手冊流程以字串相似度計算欄位準確度；外來函文流程以 CER/WER 計算 OCR 準確度，並支援多模型比較。  
+3. **資料處理層（Data Processing）**：由 Pandas/NumPy 統一完成資料清理、欄位比對、統計計算與結果彙整。  
+4. **檔案處理層（Excel I/O）**：透過 openpyxl/xlrd 讀取來源檔，並輸出包含摘要、明細與分析工作表的 Excel 報告供下載。  
+5. **維運與部署層**：API 可透過 Docker/Docker Compose 容器化執行，並可將映像推送至 GCP Artifact Registry 供後續部署。  
+
+### 技術架構詳細說明
+
+#### 1. 介面與接入層（Client / API Entry）
+- **組成**：前端頁面、curl、Python requests 或其他 HTTP 客戶端。
+- **主要工作**：
+  - 以 multipart/form-data 上傳 Excel 檔案。
+  - 呼叫對應端點啟動評估流程：
+    - `POST /evaluate`：身心障礙手冊評估
+    - `POST /evaluate-document`：外來函文評估（可帶 `valueSetId`）
+  - 接收回傳的 Excel 結果檔並下載保存。
+- **責任邊界**：僅負責發送請求與接收結果，不執行核心評估邏輯。
+
+#### 2. API 路由與請求驗證層（FastAPI Router Layer）
+- **組成**：FastAPI 路由、請求解析、參數驗證、錯誤回應格式。
+- **主要工作**：
+  - 解析上傳檔案與表單參數。
+  - 驗證檔案格式、檔案大小、空檔案等條件。
+  - 依 API 端點將請求分派到對應評估服務。
+  - 統一例外處理，回傳標準化錯誤訊息（400/422/500）。
+- **責任邊界**：處理 HTTP 協定與輸入合法性，不直接進行指標計算。
+
+#### 3. 評估引擎層（Evaluation Engine）
+- **組成**：兩條核心業務流程（身心障礙手冊、外來函文）。
+- **主要工作**：
+  - **身心障礙手冊評估**：
+    - 對照正確答案與 AI 預測欄位。
+    - 以字串相似度計算欄位與整體準確度。
+    - 產出摘要、明細與錯誤分析資料。
+  - **外來函文評估**：
+    - 解析水平格式與多模型資料。
+    - 以 CER / WER 評估 OCR 識別品質。
+    - 依模型產出獨立結果工作表，支援模型比較。
+- **責任邊界**：專注業務規則、計算方法與評分邏輯。
+
+#### 4. 資料處理與計算層（Data Processing）
+- **組成**：Pandas、NumPy。
+- **主要工作**：
+  - 將來源資料整理為可運算的表格結構。
+  - 執行資料清理、欄位標準化、缺值處理。
+  - 進行批次比對、統計聚合與結果彙整。
+  - 提供報告輸出所需的中間資料集。
+- **責任邊界**：專注資料轉換與統計運算，不處理 API 協定。
+
+#### 5. 檔案 I/O 與報告產生層（Excel I/O）
+- **組成**：openpyxl、xlrd。
+- **主要工作**：
+  - 讀取 `.xlsx` / `.xls` 輸入檔案。
+  - 將評估結果輸出為多工作表 Excel 報告。
+  - 組織摘要、明細、欄位統計、錯誤分析等內容。
+- **責任邊界**：處理檔案讀寫與報告格式，不定義評分規則。
+
+#### 6. 服務運行與維運層（Runtime / Ops）
+- **組成**：Uvicorn、Docker、Docker Compose、健康檢查、GCP Artifact Registry。
+- **主要工作**：
+  - 提供 API 運行環境與服務啟停管理。
+  - 以 `/health` 提供健康狀態檢查。
+  - 透過容器化確保部署一致性與可攜性。
+  - 將映像推送至 GCP Artifact Registry 供雲端部署。
+- **責任邊界**：保證服務可用、可部署、可監控。
+
+### 端到端處理流程
+
+1. **上傳請求**：使用者將 Excel 檔案提交到 `/evaluate` 或 `/evaluate-document`。  
+2. **請求驗證**：API 驗證檔案與參數，確認格式與內容符合規範。  
+3. **流程分派**：系統依端點分派到對應評估引擎（手冊或函文）。  
+4. **資料前處理**：讀取 Excel 並做欄位整理、清理與標準化。  
+5. **核心計算**：執行相似度或 CER/WER 指標計算，產出評估結果。  
+6. **結果彙整**：將摘要、明細、統計與分析資料整合成報告內容。  
+7. **檔案輸出**：產生 Excel 報告並以檔案回應方式提供下載。  
+8. **運維監控**：服務持續可由 `/health` 監控，並可透過 Docker/GCP 流程部署。  
+
+### 核心技術棧
+- **框架**: FastAPI 0.104.1
+- **Web服務器**: Uvicorn
+- **資料處理**: Pandas 2.1.4, NumPy < 2.0.0
+- **Excel處理**: openpyxl 3.1.2, xlrd 2.0.1
+- **API文檔**: Swagger UI, ReDoc
+- **容器化**: Docker, Docker Compose
+
+### 評估算法
+- **身心障礙手冊**: 基於字符串相似度的準確度計算
+- **外來函文**: 
+  - CER (Character Error Rate) - 字符錯誤率
+  - WER (Word Error Rate) - 詞錯誤率
+  - 支援中文文本的準確度評估
+
+### 架構特點
+- **多模式支援**: 同時支援兩種不同的評估模式
+- **水平數據格式**: 支援模型對比的水平格式數據處理
+- **容器化部署**: Docker 容器化，支援快速部署和擴展
+- **雲端就緒**: 支援 GCP Artifact Registry 部署
+
+### 性能配置
+- **端口**: 8003
+- **工作進程**: 單進程（適合 I/O 密集型任務）
+- **內存限制**: 建議 2GB 以上
+- **CPU**: 2 核心以上推薦
+
+
+
 ## 安裝與設定
 
 ### 方法1: 直接安裝
@@ -514,35 +657,6 @@ chmod +x deploy-to-gcp.sh
 - **Registry**: `asia-east1-docker.pkg.dev/itr-aimasteryhub-lab/feedback-rating-api`
 - **Image**: `feedback-judge-api:latest`
 - **完整路徑**: `asia-east1-docker.pkg.dev/itr-aimasteryhub-lab/feedback-rating-api/feedback-judge-api:latest`
-
-## 技術架構
-
-### 核心技術棧
-- **框架**: FastAPI 0.104.1
-- **Web服務器**: Uvicorn
-- **資料處理**: Pandas 2.1.4, NumPy < 2.0.0
-- **Excel處理**: openpyxl 3.1.2, xlrd 2.0.1
-- **API文檔**: Swagger UI, ReDoc
-- **容器化**: Docker, Docker Compose
-
-### 評估算法
-- **身心障礙手冊**: 基於字符串相似度的準確度計算
-- **外來函文**: 
-  - CER (Character Error Rate) - 字符錯誤率
-  - WER (Word Error Rate) - 詞錯誤率
-  - 支援中文文本的準確度評估
-
-### 架構特點
-- **多模式支援**: 同時支援兩種不同的評估模式
-- **水平數據格式**: 支援模型對比的水平格式數據處理
-- **容器化部署**: Docker 容器化，支援快速部署和擴展
-- **雲端就緒**: 支援 GCP Artifact Registry 部署
-
-### 性能配置
-- **端口**: 8003
-- **工作進程**: 單進程（適合 I/O 密集型任務）
-- **內存限制**: 建議 2GB 以上
-- **CPU**: 2 核心以上推薦
 
 ## 支援與維護
 
